@@ -1,0 +1,9 @@
+torch>=2.4
+numpy
+safetensors
+gguf
+onnx
+transformers>=5.17
+# QwenImage21 (transformer + VAE) is only in diffusers main for now
+git+https://github.com/huggingface/diffusers
+MNN   # pymnn, only for the test_*.py scripts

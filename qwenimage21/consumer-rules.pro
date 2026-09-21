@@ -1,0 +1,1 @@
+-keep class com.scsonic.qwenimage21.** { *; }

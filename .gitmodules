@@ -1,0 +1,4 @@
+[submodule "third_party/MNN"]
+	path = third_party/MNN
+	url = https://github.com/scsonic/MNN.git
+	branch = qwen-image-21

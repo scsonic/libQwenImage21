@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+.externalNativeBuild/
+.cxx/
+models/
+__pycache__/
