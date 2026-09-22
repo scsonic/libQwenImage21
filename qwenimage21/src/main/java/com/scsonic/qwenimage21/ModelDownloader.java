@@ -34,10 +34,16 @@ public final class ModelDownloader {
         cancelled = true;
     }
 
-    /** Downloads every file in {@link QwenImage21#REQUIRED_FILES} that is missing or incomplete. */
+    /**
+     * Downloads every file in {@link QwenImage21#REQUIRED_FILES} and {@link QwenImage21#EDIT_FILES} that is missing
+     * or incomplete.
+     */
     public void download(File modelDir, Listener listener) throws IOException {
         cancelled = false;
-        String[] files = QwenImage21.REQUIRED_FILES;
+        String[] files = new String[QwenImage21.REQUIRED_FILES.length + QwenImage21.EDIT_FILES.length];
+        System.arraycopy(QwenImage21.REQUIRED_FILES, 0, files, 0, QwenImage21.REQUIRED_FILES.length);
+        System.arraycopy(QwenImage21.EDIT_FILES, 0, files, QwenImage21.REQUIRED_FILES.length,
+                QwenImage21.EDIT_FILES.length);
         long[] sizes = new long[files.length];
         long total = 0;
         for (int i = 0; i < files.length; i++) {

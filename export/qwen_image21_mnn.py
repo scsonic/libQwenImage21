@@ -197,3 +197,49 @@ def sigmas_schedule(steps, image_seq_len=1024, base_seq=256, max_seq=8192, base_
     scale = one_minus[-1] / (1.0 - shift_terminal)
     s = 1.0 - one_minus / scale
     return list(s) + [0.0]
+
+
+def edit_layout(is_pad, hc, wc, H, W, axes=(16, 56, 56), theta=10000.0):
+    """Image-conditioned (edit) layout, mirroring QwenImage21Rope / block-causal mask for one condition image.
+
+    is_pad: bool list over the text-encoder tokens (after dropping the system prompt), True at <|image_pad|>
+            (hc*wc/4 slots, each standing for 2x2 latent tokens).
+    Returns (t1, t2, cos, sin, prefix_mask) where the joint prefix is [t1 text][hc*wc condition latents][t2 text],
+    cos/sin cover prefix + target (H*W) tokens, and prefix_mask is [1,1,P,P+1] with a leading dummy key.
+    """
+    first = is_pad.index(True)
+    nslots = sum(is_pad)
+    assert nslots * 4 == hc * wc and all(is_pad[first:first + nslots])
+    t1 = first
+    t2 = len(is_pad) - first - nslots
+    nc = hc * wc
+    P = t1 + nc + t2
+
+    def grid(h, w):
+        hh = torch.arange(-(h - h // 2), h // 2).repeat_interleave(w)
+        ww = torch.arange(-(w - w // 2), w // 2).repeat(h)
+        return hh, ww
+
+    ch, cw = grid(hc, wc)
+    th, tw = grid(H, W)
+    f_t1 = torch.arange(t1)
+    f_c = torch.full((nc,), t1)
+    start2 = t1 + max(hc, wc)
+    f_t2 = torch.arange(start2, start2 + t2)
+    f_tg = torch.full((H * W,), start2 + t2)
+    frame = torch.cat([f_t1, f_c, f_t2, f_tg])
+    hpos = torch.cat([f_t1, ch, f_t2, th])
+    wpos = torch.cat([f_t1, cw, f_t2, tw])
+
+    def freqs(pos, dim):
+        inv = 1.0 / torch.pow(theta, torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+        return torch.outer(pos.float(), inv)
+
+    ang = torch.cat([freqs(frame, axes[0]), freqs(hpos, axes[1]), freqs(wpos, axes[2])], dim=-1)
+    block = torch.cat([torch.full((t1,), -1), torch.zeros(nc, dtype=torch.long), torch.full((t2,), -1)])
+    q = torch.arange(P)[:, None]
+    k = torch.arange(P)[None, :]
+    allowed = (k <= q) | ((block[:, None] == block[None, :]) & (block[:, None] >= 0))
+    m = torch.full((P, P + 1), -30000.0)
+    m[:, 1:][allowed] = 0.0
+    return t1, t2, torch.cos(ang), torch.sin(ang), m.reshape(1, 1, P, P + 1)

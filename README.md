@@ -1,7 +1,7 @@
 # libQwenImage21 — Qwen-Image-2.1 on Android
 
-Run [Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) text-to-image **fully on-device** on Android phones,
-with [MNN](https://github.com/alibaba/MNN), int4 weights and the OpenCL GPU backend.
+Run [Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) **text-to-image and image editing fully on-device** on
+Android phones, with [MNN](https://github.com/alibaba/MNN), int4 weights and the OpenCL GPU backend.
 
 This repo contains an Android library (`qwenimage21`, AAR) with a small Java API, a demo app, an adb command-line
 tool, and the scripts that convert the original model to MNN. Converted models are on Hugging Face:
@@ -16,14 +16,24 @@ tool, and the scripts that convert the original model to MNN. Converted models a
 *Generated on a Snapdragon 8 Gen 2 phone, 512×512. Left: 8 steps, "A red apple on a wooden table, soft window light,
 photorealistic". Middle: 20 steps, "A cozy coffee shop on a rainy evening, warm light…".*
 
+<p>
+<img src="docs/sample_edit_pear.png" width="32%"/>
+<img src="docs/sample_lighthouse_576x448.png" width="36%"/>
+</p>
+
+*Same MNN model files, run with the CPU backend on a Mac, 8 steps. Left: image edit of the apple picture above with
+"Replace the red apple with a green pear, keep everything else the same". Right: 576×448, "A lighthouse on a rocky coast
+at sunset, dramatic clouds".*
+
 ## Status
 
 | | |
 |---|---|
-| Resolution | 512×512 (text-to-image) |
+| Modes | text-to-image, image editing (one input image) |
+| Resolution | ~512×512 pixels at any aspect ratio (sides multiple of 32): 512×512, 576×448, 608×416, 672×384, … |
 | Tested device | Snapdragon 8 Gen 2 (Adreno 740), 16 GB RAM, Android 13 |
 | Speed | ~19.7 s per denoising step on OpenCL fp16; ~490 s for 20 steps end to end |
-| Model download | ~10 GB (text encoder 5.1 GB, DiT 4.5 GB, VAE 0.5 GB) |
+| Model download | ~10.3 GB (text encoder + vision 5.4 GB, DiT 4.5 GB, VAE 0.7 GB) |
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
 
 Timing breakdown (20 steps): text encoder (CPU) 13–16 s · text K/V prefix 1–2 s · DiT 20 × 19.7 s · VAE (CPU) 25–40 s.
@@ -45,7 +55,12 @@ This is a first working port; see [Limitations](#limitations).
      hf download evankuo/Qwen-Image-2.1-MNN --local-dir models/qwen_image21
      scripts/push_models.sh models/qwen_image21        # -> /sdcard/Android/data/com.scsonic.qwenimage21.demo/files/qwen_image21
      ```
-3. Enter a prompt and tap **Generate**.
+3. Pick the **Text → Image** or **Image Edit** tab, enter a prompt (or reuse one from **History**), choose a size or
+   an input image, and tap **Generate** / **Edit image**.
+
+If a stage does not fit in memory the app shows an *out of memory* dialog and you can simply try again (e.g. after
+closing other apps or choosing another size). If Android kills the app anyway, the next launch tells you which stage and
+settings ran out of memory.
 
 ## Using the library
 
@@ -73,12 +88,28 @@ if (QwenImage21.missingFiles(modelDir) != null) {
 }
 
 QwenImage21.Options options = new QwenImage21.Options();   // defaults: DiT on GPU, text encoder + VAE on CPU
+options.crashMarkerFile = new File(context.getFilesDir(), "qwen_marker.txt");   // optional, see below
 try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
-    Bitmap bmp = qi.generate("A red apple on a wooden table", /*steps*/ 20, /*seed*/ 42,
-                             new File(context.getCacheDir(), "out.png"),
-                             percent -> Log.d("QwenImage21", percent + "%"));
+    // text-to-image
+    Bitmap a = qi.generate("A red apple on a wooden table", QwenImage21.Size.LANDSCAPE_4_3, /*steps*/ 20,
+                           /*seed*/ 42, new File(context.getCacheDir(), "a.png"), p -> Log.d("QI", p + "%"));
+    // image editing: output keeps the input's aspect ratio at ~512x512 pixels
+    Bitmap b = qi.edit("Change the background to a sunset beach", inputJpgOrPng, 20, 42,
+                       new File(context.getCacheDir(), "b.png"), null);
+} catch (QwenImage21Exception e) {
+    if (e.isOutOfMemory()) { /* show "out of memory"; the instance is still usable, retry later */ }
 }
 ```
+
+**Errors and memory.** Before each stage (text encoder, VAE encoder, DiT, VAE decoder) the native side compares the
+device's `MemAvailable` with that stage's estimated need and fails with `QwenImage21Exception.OUT_OF_MEMORY` instead of
+getting killed; allocation failures inside MNN are reported the same way. All buffers are released on failure, so
+calling again is safe. A process killed by Android's low-memory killer cannot be caught: set
+`Options.crashMarkerFile`, and at startup `QwenImage21.readCrashMarker(file)` returns the stage and settings of a run
+that never finished (or `null`).
+
+`QwenImage21.Size` has presets around 512×512 pixels: 1:1 512×512, 4:3 576×448, 3:4 448×576, 3:2 608×416,
+2:3 416×608, 16:9 672×384, 9:16 384×672. `generate(prompt, width, height, …)` takes any multiple of 32.
 
 | `Options` field | Default | |
 |---|---|---|
@@ -86,7 +117,7 @@ try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
 | `textEncoderOnCpu` | `true` | Qwen3-VL-8B text encoder on CPU; it runs once per prompt. |
 | `vaeOnCpu` | `true` | Keep `true` for now, see limitations. |
 | `keepModelsLoaded` | `false` | Keep all stages resident between images. Faster repeats, far more RAM. |
-| `size` | `512` | Square output size (multiple of 32). The models are tested at 512. |
+| `crashMarkerFile` | `null` | File used to report runs killed by the system on the next start. |
 | `threads` | `4` | CPU threads for the CPU stages. |
 
 The output PNG is **RGBA**: Qwen-Image-2.1 can generate transparent images (prompt e.g. *"This is an RGBA image
@@ -101,11 +132,14 @@ ANDROID_NDK=/path/to/ndk scripts/build_libmnn_android.sh     # also builds the C
 scripts/push_models.sh models/qwen_image21
 adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo \
     /sdcard/Android/data/com.scsonic.qwenimage21.demo/files/qwen_image21 /sdcard/out.png \
-    'A red apple on a wooden table' 20 42 opencl 0 1 512 low 4 1"
+    'A red apple on a wooden table' 20 42 opencl 0 1 576x448 low 4 1"
+# image edit: append the input image
+adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo <model_dir> /sdcard/edit.png \
+    'Make it winter, snow on the ground' 20 42 opencl 0 1 512 low 4 1 /sdcard/input.jpg"
 ```
 
 Arguments: `<model_dir> <out.png> <prompt> [steps=20] [seed=42] [opencl|cpu] [memory_mode=0] [te_on_cpu=1]
-[size=512] [precision=low|normal|high] [threads=4] [vae_on_cpu=0]`.
+[size=512|WxH] [precision=low|normal|high] [threads=4] [vae_on_cpu=0] [input_image]`.
 Set `QWEN_IMAGE21_DUMP=<dir>` to dump intermediate tensors (compare with `export/compare_dump.py`).
 
 ## How it works
@@ -119,6 +153,9 @@ noise  ─► [img_in + DiT step over 1024 image tokens, attending to cached tex
        ─► VAE decoder ─► 512×512 RGBA PNG
 ```
 
+- **Image editing** feeds the input image twice: to the Qwen3-VL vision tower (so the text encoder "sees" it) and
+  through the VAE encoder into latent tokens. The DiT prefix becomes `[text | condition-image latents | text]` with a
+  block-causal mask (the image block is bidirectional) and multi-block RoPE, and is cached like the text-only prefix.
 - Qwen-Image-2.1 uses block-causal attention: text tokens never see the image, and text/condition tokens are
   modulated with t = 0. So the text K/V are computed **once**, and each step only runs the image tokens. This is
   diffusers' `use_kv_cache=True` path.
@@ -161,7 +198,10 @@ Verification scripts in `export/`: `test_equiv.py` (re-implementation vs. diffus
   on the CPU. It still peaks at several GB there; tiled decoding is the next step.
 - **Memory:** stages are loaded one at a time (text encoder → DiT → VAE) and released after use. Phones with less than
   12 GB of RAM are untested.
-- Only text-to-image at 512×512. Image editing / reference images (Qwen3-VL vision tower) aren't ported yet.
+- Image editing supports one input image (Qwen-Image-2.1 can take up to 10). Its prefix is ~1000 tokens longer, so the
+  prefix pass takes about one extra step.
+- On MNN's CPU backend, `Memory_Low` (dynamic int8 GEMM) returned wrong results for long prefixes, so the CPU DiT
+  runtime uses `Memory_Normal`.
 - No CFG (Qwen-Image-2.1 is meant to be sampled without it). The default is 20 steps; the official default is 40.
 
 ## Repository layout
@@ -195,10 +235,15 @@ Verification scripts in `export/`: `test_equiv.py` (re-implementation vs. diffus
 Snapdragon 8 Gen 2（16 GB）上 512×512、20 步約 8 分鐘。
 
 - **快速開始**：安裝 `demo` APK → 在 App 裡按「Download models」（約 10 GB，可續傳），或用
-  `hf download evankuo/Qwen-Image-2.1-MNN` 下載後以 `scripts/push_models.sh` 推到手機 → 輸入 prompt → Generate。
-- **當函式庫用**：引入 `qwenimage21` 模組，`new QwenImage21(modelDir, options).generate(prompt, steps, seed, outPng, listener)`，
+  `hf download evankuo/Qwen-Image-2.1-MNN` 下載後以 `scripts/push_models.sh` 推到手機 → 選「Text → Image」或
+  「Image Edit」分頁 → 輸入 prompt（可從 History 取用先前的 prompt）→ Generate。
+- **尺寸**：總像素約 512×512，比例可選 1:1、4:3、3:4、3:2、2:3、16:9、9:16；編輯模式依輸入圖比例自動決定。
+- **記憶體不足**：每個階段開始前會先檢查可用記憶體，不夠就跳出「記憶體不足」並釋放資源，可以直接再按一次；
+  若 App 仍被系統殺掉，下次開啟會顯示是哪個階段、哪組設定記憶體不足。
+- **當函式庫用**：引入 `qwenimage21` 模組，`generate(prompt, Size, steps, seed, outPng, listener)` 文生圖、
+  `edit(prompt, inputImage, steps, seed, outPng, listener)` 圖片編輯，錯誤丟 `QwenImage21Exception`（`isOutOfMemory()`）。
   要在背景執行緒呼叫。
 - **轉檔重點**：DiT 直接用 GGUF Q4_K，無損搬進 MNN int4（block 32）。文字編碼器與 Qwen3-VL-8B-Instruct 權重相同，
   直接用現成的 MNN 版。VAE 用殘差流 ÷256 + RMSNorm 預除 max|x|，讓 fp16 不溢位。
-- **已知限制**：每步約 20 秒；VAE 在 GPU 上會吃爆記憶體，所以目前跑在 CPU；只支援 512 文生圖；建議 12 GB 以上 RAM。
+- **已知限制**：每步約 20 秒；VAE 在 GPU 上會吃爆記憶體，所以目前跑在 CPU；編輯只支援一張輸入圖；建議 12 GB 以上 RAM。
 - **授權**：程式碼 Apache-2.0；模型依 Qwen Research License。

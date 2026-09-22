@@ -24,3 +24,21 @@ json.dump({
     "use_template": False,
 }, open(os.path.join(d, "te_config.json"), "w"), indent=2)
 print("wrote", d)
+
+# Vision variant for image editing: the stock visual.mnn reads the condition image (Omni path, mRoPE from the model).
+vl = json.load(open(os.path.join(d, "llm_config.json")))
+vl.update({"hidden_states": True, "hidden_states_output": src["hidden_states_output"]})
+json.dump(vl, open(os.path.join(d, "te_vl_llm_config.json"), "w"), ensure_ascii=False, indent=2)
+json.dump({
+    "llm_model": "llm.mnn",
+    "llm_weight": "llm.mnn.weight",
+    "embedding_file": "embeddings_int4.bin",
+    "visual_model": "visual.mnn",
+    "llm_config": "te_vl_llm_config.json",
+    "backend_type": "cpu",
+    "thread_num": 4,
+    "precision": "low",
+    "memory": "low",
+    "use_template": False,
+    "mllm": {"backend_type": "cpu", "thread_num": 4, "precision": "normal", "memory": "low"},
+}, open(os.path.join(d, "te_vl_config.json"), "w"), indent=2)

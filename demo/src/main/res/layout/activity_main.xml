@@ -17,19 +17,104 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/prompt"
+        <!-- tabs -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:gravity="top"
-            android:hint="Prompt"
-            android:inputType="textMultiLine"
-            android:minLines="3" />
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/tab_t2i"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Text → Image" />
+
+            <Button
+                android:id="@+id/tab_i2i"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Image Edit" />
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/prompt"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="top"
+                android:hint="Prompt"
+                android:inputType="textMultiLine"
+                android:minLines="3" />
+
+            <Button
+                android:id="@+id/history"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:text="History" />
+        </LinearLayout>
+
+        <!-- text-to-image options -->
+        <LinearLayout
+            android:id="@+id/panel_t2i"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Size" />
+
+            <Spinner
+                android:id="@+id/size"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- image edit options -->
+        <LinearLayout
+            android:id="@+id/panel_i2i"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/pick"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Choose input image" />
+
+            <TextView
+                android:id="@+id/input_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No image selected. Output keeps its aspect ratio at ~512×512 pixels."
+                android:textSize="12sp" />
+
+            <ImageView
+                android:id="@+id/input_preview"
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <TextView
@@ -89,7 +174,7 @@
             android:id="@+id/generate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Generate 512×512" />
+            android:text="Generate" />
 
         <ProgressBar
             android:id="@+id/progress"

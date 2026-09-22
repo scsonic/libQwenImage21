@@ -1,32 +1,55 @@
 package com.scsonic.qwenimage21.demo;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.scsonic.qwenimage21.ModelDownloader;
 import com.scsonic.qwenimage21.QwenImage21;
+import com.scsonic.qwenimage21.QwenImage21Exception;
+
+import org.json.JSONArray;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
+    private static final int REQUEST_PICK = 1;
+    private static final int MAX_HISTORY = 100;
+
     private EditText prompt, steps, seed;
     private CheckBox gpu, teCpu, keep;
-    private Button download, generate;
+    private Button tabT2i, tabI2i, download, generate;
+    private View panelT2i, panelI2i;
+    private Spinner size;
     private ProgressBar progress;
-    private TextView status;
-    private ImageView image;
-    private File modelDir;
+    private TextView status, inputInfo;
+    private ImageView image, inputPreview;
+    private File modelDir, inputFile, crashMarker;
+    private boolean editMode;
     private QwenImage21 model;
     private String modelKey;
+    private SharedPreferences prefs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -38,18 +61,55 @@ public class MainActivity extends Activity {
         gpu = findViewById(R.id.gpu);
         teCpu = findViewById(R.id.te_cpu);
         keep = findViewById(R.id.keep);
+        tabT2i = findViewById(R.id.tab_t2i);
+        tabI2i = findViewById(R.id.tab_i2i);
+        panelT2i = findViewById(R.id.panel_t2i);
+        panelI2i = findViewById(R.id.panel_i2i);
+        size = findViewById(R.id.size);
         download = findViewById(R.id.download);
         generate = findViewById(R.id.generate);
         progress = findViewById(R.id.progress);
         status = findViewById(R.id.status);
+        inputInfo = findViewById(R.id.input_info);
         image = findViewById(R.id.image);
+        inputPreview = findViewById(R.id.input_preview);
         image.setBackgroundColor(Color.rgb(0xE0, 0xE0, 0xE0));  // shows transparent (RGBA) output
 
-        prompt.setText("A cozy coffee shop on a rainy evening, warm light, a sign that reads \"QWEN\"");
+        prefs = getSharedPreferences("demo", MODE_PRIVATE);
         modelDir = new File(getExternalFilesDir(null), "qwen_image21");
-        refreshModelStatus();
+        inputFile = new File(getFilesDir(), "edit_input.img");
+        crashMarker = new File(getFilesDir(), "generation_in_progress.txt");
+
+        ArrayAdapter<QwenImage21.Size> sizes = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item,
+                QwenImage21.Size.values());
+        sizes.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        size.setAdapter(sizes);
+        size.setSelection(prefs.getInt("size", 0));
+
+        List<String> history = loadHistory();
+        prompt.setText(history.isEmpty()
+                ? "A cozy coffee shop on a rainy evening, warm light, a sign that reads \"QWEN\"" : history.get(0));
+
+        tabT2i.setOnClickListener(v -> setEditMode(false));
+        tabI2i.setOnClickListener(v -> setEditMode(true));
+        findViewById(R.id.history).setOnClickListener(v -> showHistory());
+        findViewById(R.id.pick).setOnClickListener(v -> pickImage());
         download.setOnClickListener(v -> startDownload());
         generate.setOnClickListener(v -> startGeneration());
+        setEditMode(prefs.getBoolean("editMode", false));
+        refreshModelStatus();
+        if (inputFile.isFile()) showInput();
+
+        // A previous run killed by the system (low-memory killer) left its marker behind.
+        String crash = QwenImage21.readCrashMarker(crashMarker);
+        if (crash != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("記憶體不足 · Out of memory")
+                    .setMessage(crash + "\n\nTry closing other apps, a smaller size, or turning off "
+                            + "\"Keep models in memory\".")
+                    .setPositiveButton("OK", null)
+                    .show();
+        }
     }
 
     @Override
@@ -58,21 +118,123 @@ public class MainActivity extends Activity {
         if (model != null) model.close();
     }
 
+    // ------------------------------------------------------------------------------------------ tabs / inputs
+
+    private void setEditMode(boolean edit) {
+        editMode = edit;
+        prefs.edit().putBoolean("editMode", edit).apply();
+        panelT2i.setVisibility(edit ? View.GONE : View.VISIBLE);
+        panelI2i.setVisibility(edit ? View.VISIBLE : View.GONE);
+        tabT2i.setAlpha(edit ? 0.5f : 1f);
+        tabI2i.setAlpha(edit ? 1f : 0.5f);
+        generate.setText(edit ? "Edit image" : "Generate");
+        prompt.setHint(edit ? "Describe the edit, e.g. \"Change the background to a sunset beach\"" : "Prompt");
+    }
+
+    private void pickImage() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        startActivityForResult(Intent.createChooser(intent, "Choose image"), REQUEST_PICK);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_PICK || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             OutputStream out = new FileOutputStream(inputFile)) {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        } catch (Exception e) {
+            status.setText("Cannot read image: " + e.getMessage());
+            return;
+        }
+        showInput();
+    }
+
+    private void showInput() {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inSampleSize = 4;
+        Bitmap bmp = BitmapFactory.decodeFile(inputFile.getAbsolutePath(), o);
+        if (bmp == null) {
+            inputInfo.setText("Unsupported image");
+            return;
+        }
+        inputPreview.setImageBitmap(bmp);
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(inputFile.getAbsolutePath(), b);
+        int[] out = editSize(b.outWidth, b.outHeight);
+        inputInfo.setText(String.format("Input %d×%d → output %d×%d", b.outWidth, b.outHeight, out[0], out[1]));
+    }
+
+    /** Same rule as the native side: keep the aspect ratio at 512x512 pixels, round each side to 32. */
+    private static int[] editSize(int w, int h) {
+        double ratio = (double) w / h;
+        double fw = Math.sqrt(512.0 * 512.0 * ratio);
+        return new int[]{Math.max(256, (int) Math.round(fw / 32) * 32),
+                Math.max(256, (int) Math.round(fw / ratio / 32) * 32)};
+    }
+
+    // ------------------------------------------------------------------------------------------ prompt history
+
+    private List<String> loadHistory() {
+        List<String> list = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(prefs.getString("history", "[]"));
+            for (int i = 0; i < a.length(); i++) list.add(a.getString(i));
+        } catch (Exception ignored) {
+        }
+        return list;
+    }
+
+    /** Newest first; a prompt already in the list is not added again. */
+    private void addHistory(String text) {
+        List<String> list = loadHistory();
+        if (text.isEmpty() || list.contains(text)) return;
+        list.add(0, text);
+        while (list.size() > MAX_HISTORY) list.remove(list.size() - 1);
+        prefs.edit().putString("history", new JSONArray(list).toString()).apply();
+    }
+
+    private void showHistory() {
+        List<String> list = loadHistory();
+        if (list.isEmpty()) {
+            new AlertDialog.Builder(this).setMessage("No prompts yet").setPositiveButton("OK", null).show();
+            return;
+        }
+        String[] items = list.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("Prompt history")
+                .setItems(items, (d, which) -> prompt.setText(items[which]))
+                .setNegativeButton("Close", null)
+                .setNeutralButton("Clear", (d, w) -> prefs.edit().remove("history").apply())
+                .show();
+    }
+
+    // ------------------------------------------------------------------------------------------ models
+
     private boolean refreshModelStatus() {
         String missing = QwenImage21.missingFiles(modelDir);
+        String missingEdit = QwenImage21.missingEditFiles(modelDir);
         if (missing != null) {
             status.setText("Models not found in " + modelDir + "\nMissing: " + missing
                     + "\n\nTap Download, or push them with:\nhf download " + ModelDownloader.DEFAULT_REPO
                     + " --local-dir qwen_image21\nadb push qwen_image21 " + modelDir.getParent() + "/");
             return false;
         }
-        status.setText("Models: " + modelDir);
+        status.setText("Models: " + modelDir + (missingEdit != null ? "\nImage edit needs: " + missingEdit : "")
+                + "\nFree memory: " + QwenImage21.availableMemoryMB() + " MB");
         return true;
     }
 
     private void setBusy(boolean busy) {
         download.setEnabled(!busy);
         generate.setEnabled(!busy);
+        tabT2i.setEnabled(!busy);
+        tabI2i.setEnabled(!busy);
     }
 
     private void startDownload() {
@@ -93,49 +255,78 @@ public class MainActivity extends Activity {
         }, "model-download").start();
     }
 
+    // ------------------------------------------------------------------------------------------ generation
+
     private void startGeneration() {
         if (!refreshModelStatus()) return;
+        if (editMode && QwenImage21.missingEditFiles(modelDir) != null) {
+            showError("Missing files", "Image edit needs: " + QwenImage21.missingEditFiles(modelDir));
+            return;
+        }
+        if (editMode && !inputFile.isFile()) {
+            showError("No input image", "Choose an input image first.");
+            return;
+        }
         final String text = prompt.getText().toString().trim();
+        addHistory(text);
+        final boolean edit = editMode;
         final int nSteps = parse(steps, 20);
         final int nSeed = parse(seed, 42);
+        final QwenImage21.Size sz = (QwenImage21.Size) size.getSelectedItem();
+        prefs.edit().putInt("size", size.getSelectedItemPosition()).apply();
         final QwenImage21.Options options = new QwenImage21.Options();
         options.useGpu = gpu.isChecked();
         options.textEncoderOnCpu = teCpu.isChecked();
         options.keepModelsLoaded = keep.isChecked();
+        options.crashMarkerFile = crashMarker;
         final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded;
         final File out = new File(getExternalFilesDir(null), "outputs/qwen_" + System.currentTimeMillis() + ".png");
 
         setBusy(true);
         progress.setProgress(0);
-        status.setText("Generating… (text encoder → DiT " + nSteps + " steps → VAE)");
+        status.setText(edit ? "Editing… (text encoder + vision → VAE encoder → DiT " + nSteps + " steps → VAE)"
+                : "Generating " + sz.width + "×" + sz.height + "… (text encoder → DiT " + nSteps + " steps → VAE)");
         final long start = SystemClock.elapsedRealtime();
         new Thread(() -> {
             Bitmap bmp = null;
-            String error = null;
+            QwenImage21Exception error = null;
             try {
                 if (model == null || !key.equals(modelKey)) {
                     if (model != null) model.close();
                     model = new QwenImage21(modelDir, options);
                     modelKey = key;
                 }
-                bmp = model.generate(text, nSteps, nSeed, out, p -> runOnUiThread(() -> progress.setProgress(p)));
-            } catch (Exception e) {
-                error = e.getMessage();
+                QwenImage21.ProgressListener listener = p -> runOnUiThread(() -> progress.setProgress(p));
+                bmp = edit ? model.edit(text, inputFile, nSteps, nSeed, out, listener)
+                        : model.generate(text, sz, nSteps, nSeed, out, listener);
+            } catch (QwenImage21Exception e) {
+                error = e;
+            } catch (RuntimeException e) {
+                error = new QwenImage21Exception(QwenImage21Exception.RUNTIME_ERROR, String.valueOf(e.getMessage()));
             }
             final Bitmap result = bmp;
-            final String err = error;
+            final QwenImage21Exception err = error;
             final double sec = (SystemClock.elapsedRealtime() - start) / 1000.0;
             runOnUiThread(() -> {
                 setBusy(false);
                 if (result != null) {
                     image.setImageBitmap(result);
                     status.setText(String.format("Done in %.1f s (seed %d)\n%s", sec, nSeed, out));
+                } else if (err != null && err.isOutOfMemory()) {
+                    status.setText(String.format("Out of memory after %.1f s", sec));
+                    showError("記憶體不足 · Out of memory", err.getMessage()
+                            + "\n\nClose other apps or pick a smaller size, then tap the button again.");
                 } else {
-                    status.setText(String.format("Failed after %.1f s: %s\nSee logcat tags QwenImage21 / MNNJNI.",
-                            sec, err != null ? err : "generation error"));
+                    status.setText(String.format("Failed after %.1f s", sec));
+                    showError("Generation failed", (err != null ? err.getMessage() : "unknown error")
+                            + "\n\nSee logcat tags QwenImage21 / MNNJNI.");
                 }
             });
         }, "qwen-image").start();
+    }
+
+    private void showError(String title, String message) {
+        new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show();
     }
 
     private static int parse(EditText e, int def) {

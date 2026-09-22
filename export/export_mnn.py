@@ -330,7 +330,8 @@ def main():
         m = Q.ImgIn(wp).eval()
         p = os.path.join(onnx_dir, "img_in.onnx")
         export_onnx(m, (torch.randn(1, 16, Q.IN_CH),), p, ["lat"], ["img_h"], {"lat": {1: "N"}, "img_h": {1: "N"}})
-        to_mnn(p, os.path.join(a.out, "img_in.mnn"), linears(m), lambda n: a.aux_bits, a.block, a.hqq)
+        # img_in is tiny (64x4096) and int8 produced NaN rows on MNN CPU for VAE-encoded latents: keep fp16
+        to_mnn(p, os.path.join(a.out, "img_in.mnn"), linears(m), lambda n: 16, a.block, a.hqq)
     if "dit" in only:
         m = Q.DiT(wp, params, layers=layers).eval()
         n, pl = 16, 8
