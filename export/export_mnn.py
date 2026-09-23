@@ -11,7 +11,7 @@ import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "../third_party/MNN/transformers/llm/export"))
+sys.path.insert(0, os.path.join(HERE, "../ref/llmexport"))
 import qwen_image21_mnn as Q
 from utils.torch_utils import quant as torch_quant
 
@@ -336,12 +336,19 @@ def main():
         m = Q.DiT(wp, params, layers=layers).eval()
         n, pl = 16, 8
         inputs = (torch.randn(1, n, Q.DIM), torch.tensor([0.5]), torch.randn(n, 64), torch.randn(n, 64),
-                  torch.randn(layers, 2, pl, Q.HEADS, Q.HEAD_DIM), torch.zeros(1, 1, n, pl + n))
+                  torch.zeros(1, 1, n, pl + n),
+                  *[torch.randn(2, pl, Q.HEADS, Q.HEAD_DIM) for _ in range(layers)])
         p = os.path.join(onnx_dir, "dit.onnx")
-        export_onnx(m, inputs, p, ["hidden", "timestep", "rope_cos", "rope_sin", "past_kv", "attn_mask"],
-                    ["out", "present_kv"],
-                    {"hidden": {1: "N"}, "rope_cos": {0: "N"}, "rope_sin": {0: "N"}, "past_kv": {2: "P"},
-                     "attn_mask": {2: "N", 3: "T"}, "out": {1: "N"}, "present_kv": {2: "N"}})
+        past_names = [f"past_kv_{i}" for i in range(layers)]
+        present_names = [f"present_kv_{i}" for i in range(layers)]
+        dynamic = {"hidden": {1: "N"}, "rope_cos": {0: "N"}, "rope_sin": {0: "N"},
+                   "attn_mask": {2: "N", 3: "T"}, "out": {1: "N"}}
+        for nm in past_names:
+            dynamic[nm] = {1: "P"}
+        for nm in present_names:
+            dynamic[nm] = {1: "N"}
+        export_onnx(m, inputs, p, ["hidden", "timestep", "rope_cos", "rope_sin", "attn_mask"] + past_names,
+                    ["out"] + present_names, dynamic)
         to_mnn(p, os.path.join(a.out, "dit.mnn"), linears(m), bits_for, a.block, a.hqq)
 
 

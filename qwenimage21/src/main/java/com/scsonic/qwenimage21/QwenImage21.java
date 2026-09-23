@@ -43,28 +43,111 @@ public final class QwenImage21 implements AutoCloseable {
             "text_encoder/te_vl_config.json", "text_encoder/te_vl_llm_config.json",
     };
 
-    /** Output sizes around 512x512 pixels (the models are tested at this pixel count). */
-    public enum Size {
-        SQUARE_1_1("1:1", 512, 512),
-        LANDSCAPE_4_3("4:3", 576, 448),
-        PORTRAIT_3_4("3:4", 448, 576),
-        LANDSCAPE_3_2("3:2", 608, 416),
-        PORTRAIT_2_3("2:3", 416, 608),
-        LANDSCAPE_16_9("16:9", 672, 384),
-        PORTRAIT_9_16("9:16", 384, 672);
+    /**
+     * An output size: an aspect {@link Ratio} at a {@link Tier} pixel budget.
+     *
+     * <p>Sides are derived the way the reference pipeline does it (keep the area, round each side to a multiple of
+     * 32), so a ratio is only approximated once the sides get short: 4:3 at {@link Tier#STANDARD} is 576×448, i.e.
+     * 1.29:1. {@link #width} and {@link #height} are always the exact output.
+     */
+    public static final class Size {
+        /** Aspect ratios offered by {@link #all()}. */
+        public enum Ratio {
+            SQUARE("1:1", 1, 1),
+            LANDSCAPE_4_3("4:3", 4, 3),
+            PORTRAIT_3_4("3:4", 3, 4),
+            LANDSCAPE_3_2("3:2", 3, 2),
+            PORTRAIT_2_3("2:3", 2, 3),
+            LANDSCAPE_16_9("16:9", 16, 9),
+            PORTRAIT_9_16("9:16", 9, 16);
 
-        public final String ratio;
+            public final String label;
+            public final int w, h;
+
+            Ratio(String label, int w, int h) {
+                this.label = label;
+                this.w = w;
+                this.h = h;
+            }
+
+            @Override
+            public String toString() {
+                return label;
+            }
+        }
+
+        /**
+         * Pixel budget. Qwen-Image-2.1 was trained around one megapixel, so {@link #STANDARD} is already below its
+         * training resolution and the smaller tiers trade detail for speed and peak memory.
+         */
+        public enum Tier {
+            STANDARD("Standard", 512, "best quality"),
+            FAST("Fast", 384, "~1.8x faster steps"),
+            TINY("Tiny", 320, "~2.5x faster steps, soft detail");
+
+            /** Square root of the pixel budget: the tier renders about {@code side * side} pixels. */
+            public final int side;
+            public final String label, note;
+
+            Tier(String label, int side, String note) {
+                this.label = label;
+                this.side = side;
+                this.note = note;
+            }
+
+            @Override
+            public String toString() {
+                return label + " · ~" + side + "² px, " + note;
+            }
+        }
+
+        public final Ratio ratio;
+        public final Tier tier;
         public final int width, height;
 
-        Size(String ratio, int width, int height) {
+        private Size(Ratio ratio, Tier tier, int width, int height) {
             this.ratio = ratio;
+            this.tier = tier;
             this.width = width;
             this.height = height;
         }
 
+        /** Keeps the tier's area, rounds each side to 32 — the same rule the engine uses for image editing. */
+        public static Size of(Ratio ratio, Tier tier) {
+            double area = (double) tier.side * tier.side;
+            double ar = (double) ratio.w / ratio.h;
+            double fw = Math.sqrt(area * ar);
+            int w = Math.max(256, (int) Math.round(fw / 32.0) * 32);
+            int h = Math.max(256, (int) Math.round(fw / ar / 32.0) * 32);
+            return new Size(ratio, tier, w, h);
+        }
+
+        /** Every ratio at every tier, ratios in the order above. */
+        public static Size[] all() {
+            Size[] out = new Size[Ratio.values().length * Tier.values().length];
+            int i = 0;
+            for (Ratio r : Ratio.values()) {
+                for (Tier t : Tier.values()) out[i++] = of(r, t);
+            }
+            return out;
+        }
+
+        /** Number of latent tokens the DiT runs per denoising step; step time scales with it. */
+        public int tokens() {
+            return width / 16 * (height / 16);
+        }
+
+        public static final Size SQUARE_1_1 = of(Ratio.SQUARE, Tier.STANDARD);
+        public static final Size LANDSCAPE_4_3 = of(Ratio.LANDSCAPE_4_3, Tier.STANDARD);
+        public static final Size PORTRAIT_3_4 = of(Ratio.PORTRAIT_3_4, Tier.STANDARD);
+        public static final Size LANDSCAPE_3_2 = of(Ratio.LANDSCAPE_3_2, Tier.STANDARD);
+        public static final Size PORTRAIT_2_3 = of(Ratio.PORTRAIT_2_3, Tier.STANDARD);
+        public static final Size LANDSCAPE_16_9 = of(Ratio.LANDSCAPE_16_9, Tier.STANDARD);
+        public static final Size PORTRAIT_9_16 = of(Ratio.PORTRAIT_9_16, Tier.STANDARD);
+
         @Override
         public String toString() {
-            return ratio + "  " + width + "×" + height;
+            return ratio.label + "  " + width + "×" + height;
         }
     }
 
@@ -123,13 +206,28 @@ public final class QwenImage21 implements AutoCloseable {
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
     }
 
-    /**
-     * Image editing with one condition image. The output keeps the input's aspect ratio at about 512x512 pixels.
-     */
+    /** Image editing at {@link Size.Tier#STANDARD}. */
     public Bitmap edit(String prompt, File inputImage, int steps, int seed, File outputPng, ProgressListener listener) {
-        String settings = "image edit, " + steps + " steps";
-        run(prompt, inputImage.getAbsolutePath(), 512, 512, steps, seed, outputPng, listener, settings);
+        return edit(prompt, inputImage, Size.Tier.STANDARD, steps, seed, outputPng, listener);
+    }
+
+    /**
+     * Image editing with one condition image. The output keeps the input's aspect ratio at the tier's pixel budget;
+     * {@link #editSize} computes it.
+     */
+    public Bitmap edit(String prompt, File inputImage, Size.Tier tier, int steps, int seed, File outputPng,
+                       ProgressListener listener) {
+        String settings = "image edit ~" + tier.side + "² px, " + steps + " steps";
+        run(prompt, inputImage.getAbsolutePath(), tier.side, tier.side, steps, seed, outputPng, listener, settings);
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
+    }
+
+    /** The {@code {width, height}} an {@link #edit} of a {@code srcW}×{@code srcH} image produces at this tier. */
+    public static int[] editSize(int srcW, int srcH, Size.Tier tier) {
+        double ar = (double) srcW / srcH;
+        double fw = Math.sqrt((double) tier.side * tier.side * ar);
+        return new int[]{Math.max(256, (int) Math.round(fw / 32.0) * 32),
+                Math.max(256, (int) Math.round(fw / ar / 32.0) * 32)};
     }
 
     private synchronized void run(String prompt, String input, int width, int height, int steps, int seed,

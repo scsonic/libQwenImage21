@@ -21,15 +21,16 @@ with torch.no_grad():
     txt_h = Q.TxtIn(W, W.param)(text)
     print("txt_h    ", rel(ld("txt_h", (1, L, 4096)), txt_h))
     dit = Q.DiT(wp, W.param)
-    _, kv = dit(txt_h, torch.tensor([0.0]), cos[:L], sin[:L], torch.zeros(32, 2, 1, 32, 128), Q.prefix_mask(L))
-    mkv = ld("prefix_kv", tuple(kv.shape))
-    print("prefix_kv", rel(mkv, kv))
+    kv = list(dit(txt_h, torch.tensor([0.0]), cos[:L], sin[:L], Q.prefix_mask(L),
+                  *[torch.zeros(2, 1, 32, 128) for _ in range(32)])[1:])
+    mkv = [ld(f"prefix_kv_{l}", tuple(kv[l].shape)) for l in range(32)]
     for l in (0, 15, 31):
-        print(f"  layer {l} K", rel(mkv[l, 0], kv[l, 0]), " V", rel(mkv[l, 1], kv[l, 1]))
+        print(f"prefix_kv layer {l} K", rel(mkv[l][0], kv[l][0]), " V", rel(mkv[l][1], kv[l][1]))
     noise = torch.from_numpy(ld("noise", (1, N, 64)))
-    v0, _ = dit(Q.ImgIn(W)(noise), torch.tensor([1.0]), cos[L:], sin[L:], kv, torch.zeros(1, 1, N, L + N))
+    v0 = dit(Q.ImgIn(W)(noise), torch.tensor([1.0]), cos[L:], sin[L:], torch.zeros(1, 1, N, L + N), *kv)[0]
     print("v0       ", rel(ld("v0", (1, N, 64)), v0))
     # same step but from MNN's own KV: isolates the step pass
-    v0b, _ = dit(Q.ImgIn(W)(noise), torch.tensor([1.0]), cos[L:], sin[L:], torch.from_numpy(mkv), torch.zeros(1, 1, N, L + N))
+    v0b = dit(Q.ImgIn(W)(noise), torch.tensor([1.0]), cos[L:], sin[L:], torch.zeros(1, 1, N, L + N),
+              *[torch.from_numpy(k) for k in mkv])[0]
     print("v0 (mnn kv)", rel(ld("v0", (1, N, 64)), v0b))
-    np.save(os.path.join(D, "ref_kv.npy"), kv.numpy())
+    np.save(os.path.join(D, "ref_kv.npy"), np.stack([k.numpy() for k in kv]))

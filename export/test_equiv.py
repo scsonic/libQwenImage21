@@ -31,11 +31,11 @@ with torch.no_grad():
                   return_dict=False)[0][:, -N:]
     cos, sin = Q.rope_tables(L, H, W)
     # prefix
-    _, present = mine(txt_in(text), torch.tensor([0.0]), cos[:L], sin[:L],
-                      torch.zeros(LAYERS, 2, 1, 32, 128), Q.prefix_mask(L))
+    present = list(mine(txt_in(text), torch.tensor([0.0]), cos[:L], sin[:L], Q.prefix_mask(L),
+                        *[torch.zeros(2, 1, 32, 128) for _ in range(LAYERS)])[1:])
     kref = cache.get_layer(1).k
-    print("prefix K max err", (present[1, 0:1] - kref).abs().max().item(), "ref max", kref.abs().max().item())
-    out, _ = mine(img_in(lat), torch.tensor([sigma]), cos[L:], sin[L:], present, torch.zeros(1, 1, N, L + N))
+    print("prefix K max err", (present[1][0:1] - kref).abs().max().item(), "ref max", kref.abs().max().item())
+    out = mine(img_in(lat), torch.tensor([sigma]), cos[L:], sin[L:], torch.zeros(1, 1, N, L + N), *present)[0]
     print("step out max err", (out - out_ref).abs().max().item(), "ref max", out_ref.abs().max().item())
 
 # scheduler vs diffusers

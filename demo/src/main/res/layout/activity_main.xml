@@ -63,23 +63,54 @@
                 android:text="History" />
         </LinearLayout>
 
-        <!-- text-to-image options -->
+        <!-- pixel budget: applies to both tabs -->
         <LinearLayout
-            android:id="@+id/panel_t2i"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="64dp"
                 android:layout_height="wrap_content"
                 android:text="Size" />
 
             <Spinner
-                android:id="@+id/size"
+                android:id="@+id/tier"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- text-to-image options -->
+        <LinearLayout
+            android:id="@+id/panel_t2i"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="64dp"
+                    android:layout_height="wrap_content"
+                    android:text="Ratio" />
+
+                <Spinner
+                    android:id="@+id/ratio"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/size_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="64dp"
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- image edit options -->
@@ -100,7 +131,7 @@
                 android:id="@+id/input_info"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="No image selected. Output keeps its aspect ratio at ~512×512 pixels."
+                android:text="No image selected. The output keeps the input's aspect ratio at the size chosen above."
                 android:textSize="12sp" />
 
             <ImageView

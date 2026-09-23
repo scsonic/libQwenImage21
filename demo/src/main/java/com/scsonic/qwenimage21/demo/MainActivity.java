@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -41,9 +42,9 @@ public class MainActivity extends Activity {
     private CheckBox gpu, teCpu, keep;
     private Button tabT2i, tabI2i, download, generate;
     private View panelT2i, panelI2i;
-    private Spinner size;
+    private Spinner ratio, tier;
     private ProgressBar progress;
-    private TextView status, inputInfo;
+    private TextView status, inputInfo, sizeInfo;
     private ImageView image, inputPreview;
     private File modelDir, inputFile, crashMarker;
     private boolean editMode;
@@ -65,12 +66,14 @@ public class MainActivity extends Activity {
         tabI2i = findViewById(R.id.tab_i2i);
         panelT2i = findViewById(R.id.panel_t2i);
         panelI2i = findViewById(R.id.panel_i2i);
-        size = findViewById(R.id.size);
+        ratio = findViewById(R.id.ratio);
+        tier = findViewById(R.id.tier);
         download = findViewById(R.id.download);
         generate = findViewById(R.id.generate);
         progress = findViewById(R.id.progress);
         status = findViewById(R.id.status);
         inputInfo = findViewById(R.id.input_info);
+        sizeInfo = findViewById(R.id.size_info);
         image = findViewById(R.id.image);
         inputPreview = findViewById(R.id.input_preview);
         image.setBackgroundColor(Color.rgb(0xE0, 0xE0, 0xE0));  // shows transparent (RGBA) output
@@ -80,11 +83,23 @@ public class MainActivity extends Activity {
         inputFile = new File(getFilesDir(), "edit_input.img");
         crashMarker = new File(getFilesDir(), "generation_in_progress.txt");
 
-        ArrayAdapter<QwenImage21.Size> sizes = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item,
-                QwenImage21.Size.values());
-        sizes.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        size.setAdapter(sizes);
-        size.setSelection(prefs.getInt("size", 0));
+        ratio.setAdapter(spinnerAdapter(QwenImage21.Size.Ratio.values()));
+        tier.setAdapter(spinnerAdapter(QwenImage21.Size.Tier.values()));
+        ratio.setSelection(prefs.getInt("ratio", 0));
+        tier.setSelection(prefs.getInt("tier", 0));
+        AdapterView.OnItemSelectedListener onSize = new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                showSize();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        };
+        ratio.setOnItemSelectedListener(onSize);
+        tier.setOnItemSelectedListener(onSize);
+        showSize();
 
         List<String> history = loadHistory();
         prompt.setText(history.isEmpty()
@@ -104,7 +119,7 @@ public class MainActivity extends Activity {
         String crash = QwenImage21.readCrashMarker(crashMarker);
         if (crash != null) {
             new AlertDialog.Builder(this)
-                    .setTitle("記憶體不足 · Out of memory")
+                    .setTitle("Out of memory")
                     .setMessage(crash + "\n\nTry closing other apps, a smaller size, or turning off "
                             + "\"Keep models in memory\".")
                     .setPositiveButton("OK", null)
@@ -129,6 +144,29 @@ public class MainActivity extends Activity {
         tabI2i.setAlpha(edit ? 1f : 0.5f);
         generate.setText(edit ? "Edit image" : "Generate");
         prompt.setHint(edit ? "Describe the edit, e.g. \"Change the background to a sunset beach\"" : "Prompt");
+    }
+
+    private <T> ArrayAdapter<T> spinnerAdapter(T[] items) {
+        ArrayAdapter<T> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return a;
+    }
+
+    private QwenImage21.Size selectedSize() {
+        return QwenImage21.Size.of((QwenImage21.Size.Ratio) ratio.getSelectedItem(),
+                (QwenImage21.Size.Tier) tier.getSelectedItem());
+    }
+
+    private QwenImage21.Size.Tier selectedTier() {
+        return (QwenImage21.Size.Tier) tier.getSelectedItem();
+    }
+
+    /** Shows the exact output size, since rounding each side to 32 only approximates the ratio at small sizes. */
+    private void showSize() {
+        if (ratio.getSelectedItem() == null || tier.getSelectedItem() == null) return;
+        QwenImage21.Size s = selectedSize();
+        sizeInfo.setText(String.format("Output %d×%d · %d latent tokens per step", s.width, s.height, s.tokens()));
+        if (inputFile.isFile()) showInput();
     }
 
     private void pickImage() {
@@ -166,16 +204,8 @@ public class MainActivity extends Activity {
         BitmapFactory.Options b = new BitmapFactory.Options();
         b.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(inputFile.getAbsolutePath(), b);
-        int[] out = editSize(b.outWidth, b.outHeight);
+        int[] out = QwenImage21.editSize(b.outWidth, b.outHeight, selectedTier());
         inputInfo.setText(String.format("Input %d×%d → output %d×%d", b.outWidth, b.outHeight, out[0], out[1]));
-    }
-
-    /** Same rule as the native side: keep the aspect ratio at 512x512 pixels, round each side to 32. */
-    private static int[] editSize(int w, int h) {
-        double ratio = (double) w / h;
-        double fw = Math.sqrt(512.0 * 512.0 * ratio);
-        return new int[]{Math.max(256, (int) Math.round(fw / 32) * 32),
-                Math.max(256, (int) Math.round(fw / ratio / 32) * 32)};
     }
 
     // ------------------------------------------------------------------------------------------ prompt history
@@ -272,8 +302,9 @@ public class MainActivity extends Activity {
         final boolean edit = editMode;
         final int nSteps = parse(steps, 20);
         final int nSeed = parse(seed, 42);
-        final QwenImage21.Size sz = (QwenImage21.Size) size.getSelectedItem();
-        prefs.edit().putInt("size", size.getSelectedItemPosition()).apply();
+        final QwenImage21.Size sz = selectedSize();
+        prefs.edit().putInt("ratio", ratio.getSelectedItemPosition())
+                .putInt("tier", tier.getSelectedItemPosition()).apply();
         final QwenImage21.Options options = new QwenImage21.Options();
         options.useGpu = gpu.isChecked();
         options.textEncoderOnCpu = teCpu.isChecked();
@@ -297,7 +328,7 @@ public class MainActivity extends Activity {
                     modelKey = key;
                 }
                 QwenImage21.ProgressListener listener = p -> runOnUiThread(() -> progress.setProgress(p));
-                bmp = edit ? model.edit(text, inputFile, nSteps, nSeed, out, listener)
+                bmp = edit ? model.edit(text, inputFile, sz.tier, nSteps, nSeed, out, listener)
                         : model.generate(text, sz, nSteps, nSeed, out, listener);
             } catch (QwenImage21Exception e) {
                 error = e;
@@ -314,7 +345,7 @@ public class MainActivity extends Activity {
                     status.setText(String.format("Done in %.1f s (seed %d)\n%s", sec, nSeed, out));
                 } else if (err != null && err.isOutOfMemory()) {
                     status.setText(String.format("Out of memory after %.1f s", sec));
-                    showError("記憶體不足 · Out of memory", err.getMessage()
+                    showError("Out of memory", err.getMessage()
                             + "\n\nClose other apps or pick a smaller size, then tap the button again.");
                 } else {
                     status.setText(String.format("Failed after %.1f s", sec));

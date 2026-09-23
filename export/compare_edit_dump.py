@@ -33,10 +33,11 @@ with torch.no_grad():
     keep = torch.tensor([not p for p in is_pad]); thk = th[:, keep]
     prefix = torch.cat([thk[:, :t1], img_in(cond), thk[:, t1:]], 1)
     P = prefix.shape[1]
-    _, kv = dit(prefix, torch.tensor([0.0]), cos[:P], sin[:P], torch.zeros(32, 2, 1, 32, 128), mask)
-    mkv = ld("prefix_kv").reshape(kv.shape)
-    print("prefix kv", rel(mkv, kv), " layer0", rel(mkv[0], kv[0]), " layer31", rel(mkv[31], kv[31]))
+    kv = list(dit(prefix, torch.tensor([0.0]), cos[:P], sin[:P], mask,
+                  *[torch.zeros(2, 1, 32, 128) for _ in range(32)])[1:])
+    mkv = [ld(f"prefix_kv_{l}").reshape(kv[l].shape) for l in range(32)]
+    print("prefix kv layer0", rel(mkv[0], kv[0]), " layer31", rel(mkv[31], kv[31]))
     noise = torch.from_numpy(ld("noise").reshape(1, -1, 64))
-    v0, _ = dit(img_in(noise), torch.tensor([1.0]), cos[P:], sin[P:], kv, torch.zeros(1, 1, H * W, P + H * W))
+    v0 = dit(img_in(noise), torch.tensor([1.0]), cos[P:], sin[P:], torch.zeros(1, 1, H * W, P + H * W), *kv)[0]
     print("v0", rel(ld("v0"), v0))
     print("t1", t1, "t2", t2, "text max", text.abs().max().item(), "pad hidden max", text[0, torch.tensor(is_pad)].abs().max().item())

@@ -5,8 +5,8 @@
 #   img_in.mnn  : packed latents [1, N, 64]   -> [1, N, 4096]
 #   dit.mnn     : 32 single-stream blocks + norm_out/proj_out
 #                 inputs : hidden [1,N,4096], timestep [1], rope_cos/rope_sin [N,64],
-#                          past_kv [32,2,P,32,128], attn_mask [1,1,N,P+N]
-#                 outputs: out [1,N,64] (velocity), present_kv [32,2,N,32,128]
+#                          attn_mask [1,1,N,P+N], past_kv_0..31 [2,P,32,128]
+#                 outputs: out [1,N,64] (velocity), present_kv_0..31 [2,N,32,128]
 #
 # Prefix pass (once per prompt): hidden = txt_in(text), timestep = 0, P = 1 dummy key masked out,
 #   causal mask; read `present_kv` -> text KV cache.
@@ -125,7 +125,9 @@ class DiT(nn.Module):
         emb = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         return self.t_lin2(F.silu(self.t_lin1(emb.reshape(1, 1, 256))))  # [1,1,DIM]
 
-    def forward(self, hidden, timestep, rope_cos, rope_sin, past_kv, attn_mask):
+    def forward(self, hidden, timestep, rope_cos, rope_sin, attn_mask, *past_kv):
+        # One [2,P,HEADS,HEAD_DIM] cache per layer rather than one [LAYERS,2,P,...] tensor: a single buffer would be
+        # P MiB, and OpenCL refuses one larger than CL_DEVICE_MAX_MEM_ALLOC_SIZE (1 GiB on Adreno 740).
         temb = self.temb(timestep)
         mod = self.modulation(F.silu(temb))  # [1,1,4*DIM]
         scale1, gate1, scale2, gate2 = torch.split(mod, DIM, dim=-1)
@@ -133,11 +135,11 @@ class DiT(nn.Module):
         presents = []
         for i, blk in enumerate(self.blocks):
             h, pk, pv = blk(h, scale1, gate1, scale2, gate2, rope_cos, rope_sin,
-                            past_kv[i, 0:1], past_kv[i, 1:2], attn_mask)
+                            past_kv[i][0:1], past_kv[i][1:2], attn_mask)
             presents.append(torch.stack([pk[0], pv[0]], dim=0))
         scale = self.norm_out(F.silu(temb))
         out = self.proj_out(layer_norm(h) * (1 + scale))
-        return out, torch.stack(presents, dim=0)
+        return (out, *presents)
 
 
 class TxtIn(nn.Module):
