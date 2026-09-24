@@ -32,10 +32,13 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - uses: android-actions/setup-android@v3
-
+      # ubuntu-latest already ships a full Android SDK (cmdline-tools, platform-tools, licenses accepted);
+      # android-actions/setup-android tries to install the long-removed legacy "tools" package and fails.
       - name: Install the pinned NDK
-        run: sdkmanager --install "ndk;28.2.13676358" >/dev/null
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "ndk;28.2.13676358"
 
       - name: Version and hash for the artifact names
         id: v
