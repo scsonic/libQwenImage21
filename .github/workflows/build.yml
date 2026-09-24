@@ -1,0 +1,81 @@
+name: Build
+
+# Builds the demo APK and the qwenimage21 AAR. Only needs the prebuilt libMNN.so and headers already
+# checked in under qwenimage21/src/main/ (see README "Building from source"), so this does NOT check out
+# the third_party/MNN submodule — that's only for rebuilding libMNN.so itself.
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # only exercised on a v*.*.* tag push, to attach assets to that release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the pinned NDK
+        run: sdkmanager --install "ndk;28.2.13676358" >/dev/null
+
+      - name: Version and hash for the artifact names
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev" >> "$GITHUB_OUTPUT"
+          fi
+          echo "hash=$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK and AAR
+        run: ./gradlew :demo:assembleDebug :qwenimage21:assembleRelease --no-daemon
+
+      - name: Name the build outputs with version + commit hash
+        id: out
+        run: |
+          set -e
+          mkdir out
+          V="${{ steps.v.outputs.version }}"; H="${{ steps.v.outputs.hash }}"
+          apk="out/libQwenImage21-demo-$V-$H.apk"
+          aar="out/qwenimage21-$V-$H.aar"
+          cp demo/build/outputs/apk/debug/demo-debug.apk "$apk"
+          cp qwenimage21/build/outputs/aar/qwenimage21-release.aar "$aar"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          echo "aar=$aar" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libQwenImage21-${{ steps.v.outputs.version }}-${{ steps.v.outputs.hash }}
+          path: out/*
+          retention-days: 30
+
+      - name: Attach to the GitHub Release for this tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          gh release view "$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$V" -R "$GITHUB_REPOSITORY" --title "$V" --generate-notes
+          gh release upload "$V" ${{ steps.out.outputs.apk }} ${{ steps.out.outputs.aar }} \
+            --clobber -R "$GITHUB_REPOSITORY"
