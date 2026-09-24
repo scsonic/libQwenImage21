@@ -16,7 +16,8 @@ Prebuilt APK/AAR: **[Releases](https://github.com/scsonic/libQwenImage21/release
 <img src="docs/demo_app.png" width="17%"/>
 </p>
 
-**Image editing** — one generated photo (left) as input, three prompts that change only the clothes:
+**Image editing** — one generated photo (left) as input, three prompts that change only the clothes. 20 more outfit
+and pose edits of the same photo: **[docs/GALLERY.md](docs/GALLERY.md)**.
 
 <p>
 <img src="docs/sample_woman_448x576.png" width="23%"/>
