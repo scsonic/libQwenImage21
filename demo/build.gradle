@@ -17,6 +17,18 @@ android {
         }
     }
 
+    // A checked-in debug key, not each machine's own ~/.android/debug.keystore: every build (local or CI)
+    // signs identically, so a newer APK from either source can update an older install in place instead of
+    // failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+    signingConfigs {
+        debug {
+            storeFile file('../qwenimage21-debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
