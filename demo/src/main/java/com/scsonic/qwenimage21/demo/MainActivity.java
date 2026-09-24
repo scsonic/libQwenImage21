@@ -274,7 +274,9 @@ public class MainActivity extends Activity {
             try {
                 new ModelDownloader().download(modelDir, (file, done, total) -> runOnUiThread(() -> {
                     progress.setProgress((int) (100 * done / Math.max(1, total)));
-                    status.setText(String.format("Downloading %s\n%.2f / %.2f GB", file, done / 1e9, total / 1e9));
+                    // file is "verifying <name>" while an existing file is checked against the repo
+                    status.setText(String.format("%s %s\n%.2f / %.2f GB", file.startsWith("verifying ") ? "Checking"
+                            : "Downloading", file.replaceFirst("^verifying ", ""), done / 1e9, total / 1e9));
                 }));
                 runOnUiThread(this::refreshModelStatus);
             } catch (Exception e) {

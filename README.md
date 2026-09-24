@@ -74,7 +74,8 @@ This is a first working port; see [Limitations](#limitations).
    ./gradlew :demo:installDebug
    ```
 2. Get the models, either
-   - in the app: tap **Download models from Hugging Face** (resumable, ~10 GB), or
+   - in the app: tap **Download models from Hugging Face** (~10 GB, resumable; files already on the phone are
+     checked against the repo's checksums and only changed ones are fetched again), or
    - from a computer:
      ```bash
      hf download evankuo/Qwen-Image-2.1-MNN --local-dir models/qwen_image21
