@@ -54,6 +54,29 @@ class Linear(nn.Module):
         return F.linear(x, self._provider(self.name).to(x.dtype))
 
 
+class LoRALinear(nn.Module):
+    """A base Linear (FakeLinear-exported, quantized as usual) plus an additive LoRA branch: two small real
+    Linears (never quantized -> fp16 in build_weight's bits==16 path) that are exported like any other
+    Q.Linear, so no new ONNX/MNN machinery is needed. forward = base(x) + B(A(x))."""
+
+    def __init__(self, name, ic, oc, wp, lora):
+        super().__init__()
+        self.base = Linear(name, ic, oc, wp)
+        r = lora.rank(name)
+        self.lora_a = Linear(f"{name}.lora_A", ic, r, lora)
+        self.lora_b = Linear(f"{name}.lora_B", r, oc, lora)
+
+    def forward(self, x):
+        return self.base(x) + self.lora_b(self.lora_a(x))
+
+
+def linear(name, ic, oc, wp, lora=None):
+    """Linear, or LoRALinear if `lora` targets this layer name."""
+    if lora is not None and lora.has(name):
+        return LoRALinear(name, ic, oc, wp, lora)
+    return Linear(name, ic, oc, wp)
+
+
 def rms_norm(x, w, eps=EPS):
     x32 = x.float()
     return (x32 * torch.rsqrt(x32.pow(2).mean(-1, keepdim=True) + eps) * w).to(x.dtype)
@@ -75,16 +98,16 @@ def apply_rope(x, cos, sin):
 
 
 class Block(nn.Module):
-    def __init__(self, i, wp, params):
+    def __init__(self, i, wp, params, lora=None):
         super().__init__()
         p = f"transformer_blocks.{i}"
-        self.to_q = Linear(f"{p}.attn.to_q", DIM, DIM, wp)
-        self.to_k = Linear(f"{p}.attn.to_k", DIM, DIM, wp)
-        self.to_v = Linear(f"{p}.attn.to_v", DIM, DIM, wp)
-        self.to_out = Linear(f"{p}.attn.to_out.0", DIM, DIM, wp)
-        self.gate = Linear(f"{p}.img_mlp.gate_layer", DIM, MLP, wp)
-        self.proj = Linear(f"{p}.img_mlp.proj", DIM, MLP, wp)
-        self.out = Linear(f"{p}.img_mlp.out", MLP, DIM, wp)
+        self.to_q = linear(f"{p}.attn.to_q", DIM, DIM, wp, lora)
+        self.to_k = linear(f"{p}.attn.to_k", DIM, DIM, wp, lora)
+        self.to_v = linear(f"{p}.attn.to_v", DIM, DIM, wp, lora)
+        self.to_out = linear(f"{p}.attn.to_out.0", DIM, DIM, wp, lora)
+        self.gate = linear(f"{p}.img_mlp.gate_layer", DIM, MLP, wp, lora)
+        self.proj = linear(f"{p}.img_mlp.proj", DIM, MLP, wp, lora)
+        self.out = linear(f"{p}.img_mlp.out", MLP, DIM, wp, lora)
         self.norm_q = nn.Parameter(params(f"{p}.attn.norm_q.weight"), requires_grad=False)
         self.norm_k = nn.Parameter(params(f"{p}.attn.norm_k.weight"), requires_grad=False)
 
@@ -109,14 +132,14 @@ class Block(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, wp, params, layers=LAYERS):
+    def __init__(self, wp, params, layers=LAYERS, lora=None):
         super().__init__()
-        self.t_lin1 = Linear("time_text_embed.timestep_embedder.linear_1", 256, DIM, wp)
-        self.t_lin2 = Linear("time_text_embed.timestep_embedder.linear_2", DIM, DIM, wp)
-        self.modulation = Linear("modulation.1", DIM, 4 * DIM, wp)
+        self.t_lin1 = linear("time_text_embed.timestep_embedder.linear_1", 256, DIM, wp, lora)
+        self.t_lin2 = linear("time_text_embed.timestep_embedder.linear_2", DIM, DIM, wp, lora)
+        self.modulation = linear("modulation.1", DIM, 4 * DIM, wp, lora)
         self.norm_out = Linear("norm_out.linear", DIM, DIM, wp)
         self.proj_out = Linear("proj_out", DIM, IN_CH, wp)
-        self.blocks = nn.ModuleList([Block(i, wp, params) for i in range(layers)])
+        self.blocks = nn.ModuleList([Block(i, wp, params, lora) for i in range(layers)])
         half = 128
         self.register_buffer("freqs", torch.exp(-math.log(10000) * torch.arange(half, dtype=torch.float32) / half))
 

@@ -34,6 +34,19 @@ and pose edits of the same photo: **[docs/GALLERY.md](docs/GALLERY.md)**.
 
 *All generated on the phone (Snapdragon 8 Gen 2), 20 steps. See [Sizes](#sizes) for the size grid.*
 
+**Turbo (experimental)** — the [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA in 6
+steps instead of 20–40, about half the time end to end. Left three: text-to-image. Right three: editing the first
+one into different outfits. Details, more samples and per-step timings: **[docs/TURBO.md](docs/TURBO.md)**.
+
+<p>
+<img src="docs/turbo_t2i_studio.png" width="15%"/>
+<img src="docs/turbo_t2i_kimono.png" width="15%"/>
+<img src="docs/turbo_t2i_harajuku.png" width="17%"/>
+<img src="docs/turbo_edit_yukata.png" width="17%"/>
+<img src="docs/turbo_edit_seifuku.png" width="17%"/>
+<img src="docs/turbo_edit_office.png" width="17%"/>
+</p>
+
 ## Status
 
 | | |
@@ -44,6 +57,7 @@ and pose edits of the same photo: **[docs/GALLERY.md](docs/GALLERY.md)**.
 | Speed | ~19 s/step on OpenCL fp16 at ~512² · ~451 s for 20 steps end to end |
 | Model download | ~10.3 GB (text encoder + vision 5.4 GB, DiT 4.5 GB, VAE 0.7 GB) |
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
+| Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +~700 MB. Not the app default yet — [docs/TURBO.md](docs/TURBO.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|
@@ -291,6 +305,10 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
   避免單一張量超過 OpenCL 單一 buffer 上限（編輯模式常見）。
 - **已知限制**：每步約 19 秒；VAE 在 GPU 上會吃爆記憶體，所以目前跑在 CPU；編輯只支援一張輸入圖；建議 12 GB
   以上 RAM。
+- **Turbo（實驗中）**：套用 [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA，6
+  步取代原本的 20–40 步，總時間約減半。用「不合併」的方式做（原本的 int4 權重完全不動，LoRA 另外存成一個
+  fp16 小分支，跟 diffusers 官方的做法一樣），所以是獨立的 `dit_turbo.mnn`，隨時可切換回原本模型，多佔約
+  700MB。目前還沒接進 App 介面，範例圖與細節見 [docs/TURBO.md](docs/TURBO.md)。
 - **CI**：每次 push 到 `main` 或打 tag，GitHub Actions 都會自動編出 APK/AAR（檔名含版號與 commit hash），
   打 `v*` tag 還會自動附加到對應的 GitHub Release。
 - **授權**：程式碼 Apache-2.0；模型依 Qwen Research License。

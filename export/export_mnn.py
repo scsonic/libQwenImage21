@@ -71,6 +71,39 @@ class GGUFWeights:
         return self._load(name)
 
 
+class LoRAWeights:
+    """Weight provider for an unmerged LoRA branch's two small matrices per targeted Linear (see
+    Q.LoRALinear). Loads the whole adapter (diffusers key format, e.g. Viggle's turbo LoRA) once; a name is
+    "<base>.lora_A" or "<base>.lora_B" where <base> is a Q.Linear name (e.g. "transformer_blocks.5.attn.to_q").
+    """
+
+    def __init__(self, path):
+        from safetensors import safe_open
+        self.t = {}
+        with safe_open(path, framework="pt") as f:
+            meta = f.metadata() or {}
+            for k in f.keys():
+                self.t[k] = f.get_tensor(k).float()
+        cfg = json.loads(meta.get("lora_adapter_metadata", "{}"))
+        r, alpha = cfg.get("transformer.r"), cfg.get("transformer.lora_alpha")
+        self.scale = (alpha / r) if r and alpha else 1.0
+        self.targets = {k[len("transformer."):-len(".lora_A.weight")]
+                        for k in self.t if k.endswith(".lora_A.weight")}
+        print(f"LoRA adapter {path}: {len(self.targets)} linears, r={r} alpha={alpha} scale={self.scale}",
+              flush=True)
+
+    def has(self, name):
+        return name in self.targets
+
+    def rank(self, name):
+        return self.t[f"transformer.{name}.lora_A.weight"].shape[0]
+
+    def __call__(self, name):
+        base, which = name.rsplit(".", 1)  # ".../to_q.lora_A" -> ".../to_q", "lora_A"
+        w = self.t[f"transformer.{base}.{which}.weight"]
+        return w * self.scale if which == "lora_B" else w
+
+
 # ---------------------------------------------------------------- MNN conversion helpers
 
 def run(args):
@@ -291,6 +324,11 @@ def main():
     ap.add_argument("--layers", type=int, default=Q.LAYERS, help="export only the first N blocks (testing)")
     ap.add_argument("--scale16", type=int, default=1, help="store quant scales as fp16")
     ap.add_argument("--fuse", type=int, default=1, help="MNNConvert --transformerFuse")
+    ap.add_argument("--lora", default=None,
+                    help="unmerged LoRA adapter (diffusers key format, e.g. Viggle turbo) added as an extra "
+                         "fp16 branch per targeted Linear; base int4 weights are untouched")
+    ap.add_argument("--dit_name", default=None, help="output filename for the dit graph (default dit.mnn, "
+                    "or dit_turbo.mnn when --lora is set)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     onnx_dir = os.path.join(a.out, "onnx")
@@ -314,7 +352,11 @@ def main():
         wp, params = W, W.param
         layers = a.layers
 
+    lora = LoRAWeights(a.lora) if a.lora else None
+
     def bits_for(name):
+        if name.endswith(".lora_A") or name.endswith(".lora_B"):
+            return 16  # small correction matrices; never quantized, same treatment as img_in.mnn
         return a.bits if name.startswith("transformer_blocks.") else a.aux_bits
 
     global SCALE16, FUSE
@@ -333,7 +375,7 @@ def main():
         # img_in is tiny (64x4096) and int8 produced NaN rows on MNN CPU for VAE-encoded latents: keep fp16
         to_mnn(p, os.path.join(a.out, "img_in.mnn"), linears(m), lambda n: 16, a.block, a.hqq)
     if "dit" in only:
-        m = Q.DiT(wp, params, layers=layers).eval()
+        m = Q.DiT(wp, params, layers=layers, lora=lora).eval()
         n, pl = 16, 8
         inputs = (torch.randn(1, n, Q.DIM), torch.tensor([0.5]), torch.randn(n, 64), torch.randn(n, 64),
                   torch.zeros(1, 1, n, pl + n),
@@ -349,7 +391,8 @@ def main():
             dynamic[nm] = {1: "N"}
         export_onnx(m, inputs, p, ["hidden", "timestep", "rope_cos", "rope_sin", "attn_mask"] + past_names,
                     ["out"] + present_names, dynamic)
-        to_mnn(p, os.path.join(a.out, "dit.mnn"), linears(m), bits_for, a.block, a.hqq)
+        dit_name = a.dit_name or ("dit_turbo.mnn" if a.lora else "dit.mnn")
+        to_mnn(p, os.path.join(a.out, dit_name), linears(m), bits_for, a.block, a.hqq)
 
 
 if __name__ == "__main__":
