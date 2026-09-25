@@ -57,7 +57,7 @@ one into different outfits. Details, more samples and per-step timings: **[docs/
 | Speed | ~19 s/step on OpenCL fp16 at ~512² · ~451 s for 20 steps end to end |
 | Model download | ~10.3 GB (text encoder + vision 5.4 GB, DiT 4.5 GB, VAE 0.7 GB) |
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
-| Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +~700 MB. Not the app default yet — [docs/TURBO.md](docs/TURBO.md) |
+| Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +5.2 GB (own copy of the base weights + the LoRA). Opt-in in the app (a download checkbox + a Turbo LoRA checkbox) — [docs/TURBO.md](docs/TURBO.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|
@@ -75,10 +75,10 @@ image's tokens (P+N keys instead of N). See [Limitations](#limitations).
    git clone https://github.com/scsonic/libQwenImage21.git && cd libQwenImage21
    ./gradlew :demo:installDebug
    ```
-2. Get the models — in the app, tap **Download models from Hugging Face** (~10 GB, resumable, checksum-verified),
-   or from a computer:
+2. Get the models — in the app, check **Standard** and/or **Turbo** (see [docs/TURBO.md](docs/TURBO.md))
+   and tap **Download models from Hugging Face** (resumable, checksum-verified), or from a computer:
    ```bash
-   hf download evankuo/Qwen-Image-2.1-MNN --local-dir models/qwen_image21
+   hf download evankuo/Qwen-Image-2.1-MNN --local-dir models/qwen_image21 --exclude "dit_turbo.mnn*"  # +turbo: drop --exclude
    scripts/push_models.sh models/qwen_image21
    ```
 3. Pick **Text → Image** or **Image Edit**, enter a prompt (or reuse one from **History**), choose a size or an
@@ -102,11 +102,14 @@ dependencies { implementation project(':qwenimage21') }
 File modelDir = new File(context.getExternalFilesDir(null), "qwen_image21");
 
 // Background thread — everything below blocks for seconds to minutes.
-if (QwenImage21.missingFiles(modelDir) != null) {
-    new ModelDownloader().download(modelDir, (file, done, total) -> { /* progress */ });  // needs INTERNET
+boolean wantTurbo = true;
+if (QwenImage21.missingStandardDitFiles(modelDir) != null && QwenImage21.missingTurboDitFiles(modelDir) != null) {
+    // needs INTERNET; downloads the standard model, or the turbo one, or both
+    new ModelDownloader().download(modelDir, !wantTurbo, wantTurbo, true, (file, done, total) -> { /* progress */ });
 }
 
 QwenImage21.Options options = new QwenImage21.Options();   // DiT on GPU, text encoder + VAE on CPU
+options.turbo = wantTurbo;   // dit_turbo.mnn, 6 fixed steps instead of whatever generate()/edit() is given
 try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
     Bitmap a = qi.generate("A red apple on a wooden table", QwenImage21.Size.LANDSCAPE_4_3, 20, 42,
                            new File(context.getCacheDir(), "a.png"), p -> Log.d("QI", p + "%"));
@@ -124,7 +127,8 @@ try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
   `tokens()`; `Size.all()` lists every combination. See [Sizes](#sizes).
 - Output is **RGBA** — Qwen-Image-2.1 can generate transparent images directly.
 - `Options`: `useGpu` (DiT on OpenCL, default true), `textEncoderOnCpu` (true), `vaeOnCpu` (true), `keepModelsLoaded`
-  (false — faster repeats, more RAM), `threads` (4). Logcat tags: `MNNJNI`, `QwenImage21`.
+  (false — faster repeats, more RAM), `threads` (4), `turbo` (false — [Turbo mode](docs/TURBO.md), needs
+  `dit_turbo.mnn`, forces 6 steps). Logcat tags: `MNNJNI`, `QwenImage21`.
 
 ## Command line (adb)
 
@@ -140,8 +144,9 @@ adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo <mod
 ```
 
 `<model_dir> <out.png> <prompt> [steps=20] [seed=42] [opencl|cpu] [memory_mode=0] [te_on_cpu=1] [size=512|WxH]
-[precision=low|normal|high] [threads=4] [vae_on_cpu=0] [input_image]`. In edit mode `size` is the pixel budget only
-(output keeps the input's ratio). `QWEN_IMAGE21_DUMP=<dir>` dumps intermediate tensors (`export/compare_dump.py`).
+[precision=low|normal|high] [threads=4] [vae_on_cpu=0] [input_image] [turbo=0]`. In edit mode `size` is the pixel
+budget only (output keeps the input's ratio). `turbo=1` loads `dit_turbo.mnn` and forces `steps` to 6 — see
+[docs/TURBO.md](docs/TURBO.md). `QWEN_IMAGE21_DUMP=<dir>` dumps intermediate tensors (`export/compare_dump.py`).
 
 ## Sizes
 
@@ -307,8 +312,10 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
   以上 RAM。
 - **Turbo（實驗中）**：套用 [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA，6
   步取代原本的 20–40 步，總時間約減半。用「不合併」的方式做（原本的 int4 權重完全不動，LoRA 另外存成一個
-  fp16 小分支，跟 diffusers 官方的做法一樣），所以是獨立的 `dit_turbo.mnn`，隨時可切換回原本模型，多佔約
-  700MB。目前還沒接進 App 介面，範例圖與細節見 [docs/TURBO.md](docs/TURBO.md)。
+  fp16 小分支，跟 diffusers 官方的做法一樣），所以是獨立的 `dit_turbo.mnn`（5.2GB，含自己一份基礎權重 +
+  LoRA），隨時可切換回原本模型。App 下載畫面可以分別勾選要下載 Standard / Turbo 模型（可以只裝一個或兩個都裝），
+  另外有一個「Turbo LoRA」勾選框決定這次生成要用哪個模型，勾選後 Steps 會鎖定顯示 6。範例圖與細節見
+  [docs/TURBO.md](docs/TURBO.md)。
 - **CI**：每次 push 到 `main` 或打 tag，GitHub Actions 都會自動編出 APK/AAR（檔名含版號與 commit hash），
   打 `v*` tag 還會自動附加到對應的 GitHub Release。
 - **授權**：程式碼 Apache-2.0；模型依 Qwen Research License。

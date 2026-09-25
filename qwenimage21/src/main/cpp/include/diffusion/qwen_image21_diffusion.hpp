@@ -39,9 +39,9 @@ public:
     // Text encoder hidden states after dropping the system prompt: [1, L, 4096].
     VARP encodePrompt(const std::string& prompt);
     // Text KV cache for all blocks: [32, 2, L, 32, 128].
-    VARP buildPrefixCache(VARP textHidden);
+    std::vector<VARP> buildPrefixCache(VARP textHidden);
     // Denoise from seeded noise against a prefix K/V of length prefixLen; returns packed latents [1, N, 64].
-    VARP denoise(VARP prefixKV, int prefixLen, const float* cosTarget, const float* sinTarget, int steps, int seed,
+    VARP denoise(const std::vector<VARP>& prefixKV, int prefixLen, const float* cosTarget, const float* sinTarget, int steps, int seed,
                  std::function<void(int)> progressCallback);
     // Image editing: one condition image (also chosen by run(..., inputImagePath)). Output keeps the input's
     // aspect ratio at the configured pixel area.
@@ -57,10 +57,19 @@ public:
     const std::string& lastError() const { return mError; }
     // Output size for the next text-to-image run (multiples of 32); edit derives it from the input image.
     void setImageSize(int width, int height);
+    // Switches between dit.mnn (20-40 step base model) and dit_turbo.mnn (6-step Viggle-turbo LoRA, baked in
+    // as an unmerged fp16 branch alongside the unchanged int4 base weights -- see export/qwen_image21_mnn.py
+    // LoRALinear). Takes effect on the next run()/runEdit(); forces the step count to 6 either way, since the
+    // LoRA was distilled against that exact sigma schedule (see sigmas()).
+    void setTurbo(bool on) override;
     // MemAvailable from /proc/meminfo in MB, or -1 where it is unavailable.
     static int availableMemoryMB();
 
-    static std::vector<float> sigmas(int steps, int imageSeqLen);
+    // turbo=true ignores `steps` (always 6) and uses the Viggle-turbo LoRA's fixed raw sigma nodes
+    // [1, 0.9375, 0.875, 0.75, 0.5, 0.25] with no shift_terminal rescale, instead of computing linspace(1,
+    // 1/steps, steps) and rescaling the last step to `terminal`. Both still go through the same resolution
+    // dependent exponential mu-shift.
+    static std::vector<float> sigmas(int steps, int imageSeqLen, bool turbo = false);
     static void ropeTables(int textLen, int hTokens, int wTokens, std::vector<float>& cosTab, std::vector<float>& sinTab);
     static void ropeFromPositions(const std::vector<int>& frame, const std::vector<int>& hpos,
                                   const std::vector<int>& wpos, std::vector<float>& cosTab, std::vector<float>& sinTab);
@@ -69,7 +78,9 @@ private:
     std::shared_ptr<Module> loadModule(const std::string& file, const std::vector<std::string>& inputs,
                                        const std::vector<std::string>& outputs,
                                        std::shared_ptr<Executor::RuntimeManager> rt);
-    VARP runPrefix(VARP hidden, const std::vector<float>& cosTab, const std::vector<float>& sinTab,
+    // "past_kv_0".."past_kv_31" / "present_kv_0".."present_kv_31": one K/V tensor per layer, see runPrefix.
+    static std::vector<std::string> kvNames(const char* prefix);
+    std::vector<VARP> runPrefix(VARP hidden, const std::vector<float>& cosTab, const std::vector<float>& sinTab,
                    const std::vector<float>& mask);
     VARP embedText(VARP textHidden);
     VARP encodeEditPrompt(const std::string& prompt, VARP bgr, int w, int h, std::vector<char>& isPad);
@@ -86,6 +97,8 @@ private:
 
     int mLatentH = 32;
     int mLatentW = 32;
+    bool mTurbo = false;
+    std::string mDitFile = "dit.mnn";
     int mDropIdx = 14;
     std::string mTeOutputName = "/Add_182_output_0";
     std::shared_ptr<Transformer::Llm> mTextEncoder;

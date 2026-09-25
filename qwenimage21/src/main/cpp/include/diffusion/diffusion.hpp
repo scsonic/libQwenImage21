@@ -225,6 +225,10 @@ public:
 
     virtual bool load() = 0;
 
+    // Model-specific extension point (currently only QwenImage21Diffusion): switch to a distilled few-step
+    // LoRA variant of the DiT if the model directory has one. No-op where not supported.
+    virtual void setTurbo(bool on) {}
+
     // Image processing utility functions (static, model-agnostic)
     static VARP resizeAndCenterCrop(VARP image, int targetW, int targetH);
     static VARP bgrToRgb(VARP bgrImage);

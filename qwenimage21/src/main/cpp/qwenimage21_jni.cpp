@@ -60,7 +60,7 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeCreate(JNIEnv* env, jclass, jstri
 extern "C" JNIEXPORT jint JNICALL
 Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlong ptr, jstring prompt,
                                                         jstring inputImage, jstring outputPng, jint steps, jint seed,
-                                                        jint width, jint height, jobject listener) {
+                                                        jint width, jint height, jboolean turbo, jobject listener) {
     auto handle = reinterpret_cast<Handle*>(ptr);
     if (!handle) return QwenImage21Diffusion::kRuntimeError;
     std::lock_guard<std::mutex> lock(handle->mutex);
@@ -73,6 +73,7 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlo
     };
     bool ok = false;
     try {
+        handle->model->setTurbo(turbo);  // forces steps to 6 internally when true; no-op when unchanged
         if (width > 0 && height > 0) handle->qwen->setImageSize(width, height);
         ok = handle->model->run(toString(env, prompt), toString(env, outputPng), steps, seed, 1.0f, cb,
                                 toString(env, inputImage));

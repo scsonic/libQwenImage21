@@ -20,7 +20,7 @@ shared with it — only `dit_turbo.mnn` is new (+ ~700 MB over `dit.mnn`'s 4.5 G
 </p>
 
 *Studio portrait (448×576, 234 s) · furisode kimono under cherry blossoms (448×576, 219 s) · Harajuku street
-fashion (512×512, 231 s). All on a Snapdragon 8 Gen 2, OpenCL, 6 steps.*
+fashion (512×512, 229 s). All on a Snapdragon 8 Gen 2, OpenCL, 6 steps.*
 
 ## Image editing
 
@@ -49,7 +49,18 @@ now-much-shorter run. See [Why MNN and OpenCL?](../README.md#why-mnn-and-opencl)
 
 ## Using it
 
-Not wired into the demo app's UI yet. From the CLI, append `1` as a 15th argument:
+**Demo app:** the download screen has separate checkboxes for the **Standard** and **Turbo** models — check
+either or both (they don't need each other; Turbo doesn't require the standard `dit.mnn`). A **Turbo LoRA**
+checkbox near Steps switches which one a generation uses; checking it fixes Steps to 6 and greys out the field
+(the LoRA was distilled against exactly that schedule), unchecking it restores manual step entry. Works in both
+Text → Image and Image Edit.
+
+**Library:** set `QwenImage21.Options.turbo = true`. `QwenImage21.missingTurboDitFiles(modelDir)` /
+`missingStandardDitFiles(modelDir)` check which variant(s) are present, and
+`new ModelDownloader().download(modelDir, wantStandard, wantTurbo, wantEditFiles, listener)` fetches whichever
+combination you ask for.
+
+**CLI:** append `1` as a 15th argument:
 
 ```bash
 adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo \
@@ -59,8 +70,13 @@ adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo \
 
 `setTurbo(true)` forces the step count to 6 regardless of what's passed in and loads `dit_turbo.mnn` instead of
 `dit.mnn`; everything else (size, edit mode, memory checks) works the same as the base model. Needs
-`dit_turbo.mnn` + `.weight` in the model directory (not yet in the default download — see the model repo for now).
+`dit_turbo.mnn` + `.weight` in the model directory — not downloaded by default; check **Turbo** on the download
+screen, or download it directly:
 
-**Status:** validated on-device (numeric check against the PyTorch reference, correlation 0.9999 on the DiT's
-velocity output; the samples above). Not yet the default — that's the plan once it's wired into the app and README
-claims are updated to match.
+```bash
+hf download evankuo/Qwen-Image-2.1-MNN dit_turbo.mnn dit_turbo.mnn.weight --local-dir qwen_image21
+```
+
+**Status:** validated on-device end to end — numeric check against the PyTorch reference (correlation 0.9999 on
+the DiT's velocity output), the samples above, and the app UI. Not yet the default; that switch is planned once
+more real-world use confirms the quality holds up outside these samples.

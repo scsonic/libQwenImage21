@@ -175,6 +175,13 @@
         </LinearLayout>
 
         <CheckBox
+            android:id="@+id/turbo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="Turbo LoRA (6 fixed steps, faster, needs dit_turbo.mnn)" />
+
+        <CheckBox
             android:id="@+id/gpu"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -195,11 +202,32 @@
             android:checked="false"
             android:text="Keep models in memory (faster repeat, more RAM)" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Download from Hugging Face — DiT model(s) to fetch:"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/dl_standard"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Standard (dit.mnn) — size unknown" />
+
+        <CheckBox
+            android:id="@+id/dl_turbo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="Turbo (dit_turbo.mnn) — size unknown" />
+
         <Button
             android:id="@+id/download"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Download models from Hugging Face (~10 GB)" />
+            android:text="Download models from Hugging Face" />
 
         <Button
             android:id="@+id/generate"

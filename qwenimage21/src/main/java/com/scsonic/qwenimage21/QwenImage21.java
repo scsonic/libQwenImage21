@@ -28,20 +28,40 @@ public final class QwenImage21 implements AutoCloseable {
         System.loadLibrary("qwenimage21_jni");
     }
 
-    /** Files (relative to the model directory) needed for text-to-image. */
-    public static final String[] REQUIRED_FILES = {
-            "dit.mnn", "dit.mnn.weight", "img_in.mnn", "img_in.mnn.weight", "txt_in.mnn", "txt_in.mnn.weight",
-            "vae_decoder.mnn",
+    /** Files needed regardless of which DiT variant ({@link #STANDARD_DIT_FILES} / {@link #TURBO_DIT_FILES}) is used. */
+    public static final String[] SHARED_FILES = {
+            "img_in.mnn", "img_in.mnn.weight", "txt_in.mnn", "txt_in.mnn.weight", "vae_decoder.mnn",
             "text_encoder/llm.mnn", "text_encoder/llm.mnn.weight", "text_encoder/embeddings_int4.bin",
             "text_encoder/tokenizer.txt", "text_encoder/llm_config.json", "text_encoder/te_config.json",
             "text_encoder/te_llm_config.json",
     };
+
+    /** The base model: 20–40 step schedule, {@link Options#turbo} = false. ~4.5 GB. */
+    public static final String[] STANDARD_DIT_FILES = {"dit.mnn", "dit.mnn.weight"};
+    /** The <a href="https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo">Viggle-turbo</a> LoRA, applied
+     * unmerged alongside the (untouched, and not re-downloaded) int4 base weights: fixed 6-step schedule,
+     * {@link Options#turbo} = true. ~5.2 GB — mostly the same base weights again, plus the LoRA's own ~0.7 GB. */
+    public static final String[] TURBO_DIT_FILES = {"dit_turbo.mnn", "dit_turbo.mnn.weight"};
+
+    /** Approximate download sizes in bytes, for UI labels before anything is downloaded. */
+    public static final long STANDARD_DIT_SIZE_BYTES = 4_473_325_942L;
+    public static final long TURBO_DIT_SIZE_BYTES = 5_159_749_254L;
+
+    /** Files needed for text-to-image with the standard (non-turbo) model: kept for existing callers. */
+    public static final String[] REQUIRED_FILES = concat(SHARED_FILES, STANDARD_DIT_FILES);
 
     /** Additional files needed for {@link #edit}. */
     public static final String[] EDIT_FILES = {
             "vae_encoder.mnn", "text_encoder/visual.mnn", "text_encoder/visual.mnn.weight",
             "text_encoder/te_vl_config.json", "text_encoder/te_vl_llm_config.json",
     };
+
+    private static String[] concat(String[] a, String[] b) {
+        String[] out = new String[a.length + b.length];
+        System.arraycopy(a, 0, out, 0, a.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
+    }
 
     /**
      * An output size: an aspect {@link Ratio} at a {@link Tier} pixel budget.
@@ -163,6 +183,12 @@ public final class QwenImage21 implements AutoCloseable {
         /** CPU threads for the CPU stages. */
         public int threads = 4;
         /**
+         * Use the <a href="https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo">Viggle-turbo</a> LoRA
+         * ({@link #TURBO_DIT_FILES}) instead of the base model. Forces the step count to 6 regardless of what is
+         * passed to {@link #generate} / {@link #edit} -- the LoRA was distilled against exactly that schedule.
+         */
+        public boolean turbo = false;
+        /**
          * Optional file used to detect runs killed by the system (e.g. low-memory killer): it holds the current stage
          * while generating and is deleted afterwards. Read it at startup with {@link #readCrashMarker(File)}.
          */
@@ -179,12 +205,12 @@ public final class QwenImage21 implements AutoCloseable {
 
     /** Loads the runtime; the heavy stages are loaded lazily during generation. */
     public QwenImage21(File modelDir, Options options) {
-        String missing = missingFiles(modelDir);
+        Options o = options != null ? options : new Options();
+        String missing = missing(modelDir, concat(SHARED_FILES, o.turbo ? TURBO_DIT_FILES : STANDARD_DIT_FILES));
         if (missing != null) {
             throw new IllegalArgumentException("Qwen-Image-2.1 model files missing in " + modelDir + ": " + missing);
         }
-        this.options = options != null ? options : new Options();
-        Options o = this.options;
+        this.options = o;
         handle = nativeCreate(modelDir.getAbsolutePath(), o.useGpu, o.textEncoderOnCpu, o.vaeOnCpu,
                 o.keepModelsLoaded ? 1 : 0, o.threads);
         if (handle == 0) {
@@ -198,10 +224,11 @@ public final class QwenImage21 implements AutoCloseable {
         return generate(prompt, size.width, size.height, steps, seed, outputPng, listener);
     }
 
-    /** Text-to-image at an explicit size (multiples of 32; keep it near 512x512 pixels). */
+    /** Text-to-image at an explicit size (multiples of 32; keep it near 512x512 pixels). {@code steps} is ignored
+     * (forced to 6) when {@link Options#turbo} is set. */
     public Bitmap generate(String prompt, int width, int height, int steps, int seed, File outputPng,
                            ProgressListener listener) {
-        String settings = "text-to-image " + width + "x" + height + ", " + steps + " steps";
+        String settings = "text-to-image " + width + "x" + height + ", " + actualSteps(steps) + " steps";
         run(prompt, null, width, height, steps, seed, outputPng, listener, settings);
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
     }
@@ -217,7 +244,7 @@ public final class QwenImage21 implements AutoCloseable {
      */
     public Bitmap edit(String prompt, File inputImage, Size.Tier tier, int steps, int seed, File outputPng,
                        ProgressListener listener) {
-        String settings = "image edit ~" + tier.side + "² px, " + steps + " steps";
+        String settings = "image edit ~" + tier.side + "² px, " + actualSteps(steps) + " steps";
         run(prompt, inputImage.getAbsolutePath(), tier.side, tier.side, steps, seed, outputPng, listener, settings);
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
     }
@@ -244,21 +271,35 @@ public final class QwenImage21 implements AutoCloseable {
         int code;
         try {
             code = nativeGenerate(handle, prompt, input, outputPng.getAbsolutePath(), steps, seed, width, height,
-                    wrapped);
+                    options.turbo, wrapped);
         } finally {
             marker.clear();
         }
         if (code != 0) throw new QwenImage21Exception(code, nativeLastError(handle));
     }
 
-    /** Returns null if every file for text-to-image exists, else a comma-separated list of the missing ones. */
+    /** Returns null if every file for text-to-image with the standard model exists, else the missing ones. */
     public static String missingFiles(File modelDir) {
         return missing(modelDir, REQUIRED_FILES);
     }
 
-    /** Like {@link #missingFiles} for the extra files image editing needs. */
+    /** Like {@link #missingFiles} for the extra files image editing needs (either DiT variant). */
     public static String missingEditFiles(File modelDir) {
         return missing(modelDir, EDIT_FILES);
+    }
+
+    /** Null if {@link #SHARED_FILES} + {@link #STANDARD_DIT_FILES} all exist, else the missing ones. */
+    public static String missingStandardDitFiles(File modelDir) {
+        return missing(modelDir, concat(SHARED_FILES, STANDARD_DIT_FILES));
+    }
+
+    /** Null if {@link #SHARED_FILES} + {@link #TURBO_DIT_FILES} all exist, else the missing ones. */
+    public static String missingTurboDitFiles(File modelDir) {
+        return missing(modelDir, concat(SHARED_FILES, TURBO_DIT_FILES));
+    }
+
+    private int actualSteps(int requested) {
+        return options.turbo ? 6 : requested;
     }
 
     /** MemAvailable of the device in MB (or -1). */
@@ -283,8 +324,9 @@ public final class QwenImage21 implements AutoCloseable {
     }
 
     private static String describe(Options o) {
-        return "DiT " + (o.useGpu ? "GPU" : "CPU") + ", text encoder " + (o.textEncoderOnCpu ? "CPU" : "GPU")
-                + ", VAE " + (o.vaeOnCpu ? "CPU" : "GPU") + (o.keepModelsLoaded ? ", keep models loaded" : "");
+        return (o.turbo ? "turbo, " : "") + "DiT " + (o.useGpu ? "GPU" : "CPU") + ", text encoder "
+                + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE " + (o.vaeOnCpu ? "CPU" : "GPU")
+                + (o.keepModelsLoaded ? ", keep models loaded" : "");
     }
 
     @Override
@@ -299,7 +341,8 @@ public final class QwenImage21 implements AutoCloseable {
                                             boolean vaeOnCpu, int memoryMode, int threads);
 
     private static native int nativeGenerate(long handle, String prompt, String inputImage, String outputPng,
-                                             int steps, int seed, int width, int height, ProgressListener listener);
+                                             int steps, int seed, int width, int height, boolean turbo,
+                                             ProgressListener listener);
 
     private static native String nativeLastError(long handle);
 

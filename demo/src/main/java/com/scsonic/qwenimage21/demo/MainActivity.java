@@ -39,7 +39,7 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 100;
 
     private EditText prompt, steps, seed;
-    private CheckBox gpu, teCpu, keep;
+    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo;
     private Button tabT2i, tabI2i, download, generate;
     private View panelT2i, panelI2i;
     private Spinner ratio, tier;
@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private QwenImage21 model;
     private String modelKey;
     private SharedPreferences prefs;
+    private String stepsBeforeTurbo = "20";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,6 +63,9 @@ public class MainActivity extends Activity {
         gpu = findViewById(R.id.gpu);
         teCpu = findViewById(R.id.te_cpu);
         keep = findViewById(R.id.keep);
+        turbo = findViewById(R.id.turbo);
+        dlStandard = findViewById(R.id.dl_standard);
+        dlTurbo = findViewById(R.id.dl_turbo);
         tabT2i = findViewById(R.id.tab_t2i);
         tabI2i = findViewById(R.id.tab_i2i);
         panelT2i = findViewById(R.id.panel_t2i);
@@ -111,6 +115,30 @@ public class MainActivity extends Activity {
         findViewById(R.id.pick).setOnClickListener(v -> pickImage());
         download.setOnClickListener(v -> startDownload());
         generate.setOnClickListener(v -> startGeneration());
+
+        dlStandard.setText(String.format("Standard (dit.mnn) — %.1f GB",
+                QwenImage21.STANDARD_DIT_SIZE_BYTES / 1e9));
+        dlTurbo.setText(String.format("Turbo (dit_turbo.mnn) — %.1f GB, 6 fixed steps",
+                QwenImage21.TURBO_DIT_SIZE_BYTES / 1e9));
+        dlStandard.setChecked(prefs.getBoolean("dlStandard", true));
+        dlTurbo.setChecked(prefs.getBoolean("dlTurbo", false));
+        dlStandard.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlStandard", c).apply());
+        dlTurbo.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlTurbo", c).apply());
+
+        turbo.setChecked(prefs.getBoolean("turbo", false));
+        turbo.setOnCheckedChangeListener((b, checked) -> {
+            prefs.edit().putBoolean("turbo", checked).apply();
+            if (checked) {
+                stepsBeforeTurbo = steps.getText().toString();
+                steps.setText("6");
+            } else {
+                steps.setText(stepsBeforeTurbo);
+            }
+            steps.setEnabled(!checked);
+        });
+        steps.setEnabled(!turbo.isChecked());
+        if (turbo.isChecked()) steps.setText("6");
+
         setEditMode(prefs.getBoolean("editMode", false));
         refreshModelStatus();
         if (inputFile.isFile()) showInput();
@@ -246,16 +274,21 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------------------------------ models
 
+    /** True if at least one DiT variant (standard and/or turbo) is fully downloaded. */
     private boolean refreshModelStatus() {
-        String missing = QwenImage21.missingFiles(modelDir);
+        String missingStd = QwenImage21.missingStandardDitFiles(modelDir);
+        String missingTurbo = QwenImage21.missingTurboDitFiles(modelDir);
         String missingEdit = QwenImage21.missingEditFiles(modelDir);
-        if (missing != null) {
-            status.setText("Models not found in " + modelDir + "\nMissing: " + missing
+        if (missingStd != null && missingTurbo != null) {
+            status.setText("Models not found in " + modelDir + "\nMissing: " + missingStd
                     + "\n\nTap Download, or push them with:\nhf download " + ModelDownloader.DEFAULT_REPO
                     + " --local-dir qwen_image21\nadb push qwen_image21 " + modelDir.getParent() + "/");
             return false;
         }
-        status.setText("Models: " + modelDir + (missingEdit != null ? "\nImage edit needs: " + missingEdit : "")
+        status.setText("Models: " + modelDir
+                + "\nStandard model (dit.mnn): " + (missingStd == null ? "ready" : "not downloaded")
+                + "\nTurbo model (dit_turbo.mnn): " + (missingTurbo == null ? "ready" : "not downloaded")
+                + (missingEdit != null ? "\nImage edit needs: " + missingEdit : "")
                 + "\nFree memory: " + QwenImage21.availableMemoryMB() + " MB");
         return true;
     }
@@ -268,11 +301,18 @@ public class MainActivity extends Activity {
     }
 
     private void startDownload() {
+        final boolean wantStandard = dlStandard.isChecked();
+        final boolean wantTurbo = dlTurbo.isChecked();
+        if (!wantStandard && !wantTurbo) {
+            showError("Nothing selected", "Check Standard and/or Turbo above first.");
+            return;
+        }
         setBusy(true);
         progress.setProgress(0);
         new Thread(() -> {
             try {
-                new ModelDownloader().download(modelDir, (file, done, total) -> runOnUiThread(() -> {
+                new ModelDownloader().download(modelDir, wantStandard, wantTurbo, true,
+                        (file, done, total) -> runOnUiThread(() -> {
                     progress.setProgress((int) (100 * done / Math.max(1, total)));
                     // file is "verifying <name>" while an existing file is checked against the repo
                     status.setText(String.format("%s %s\n%.2f / %.2f GB", file.startsWith("verifying ") ? "Checking"
@@ -291,6 +331,14 @@ public class MainActivity extends Activity {
 
     private void startGeneration() {
         if (!refreshModelStatus()) return;
+        final boolean useTurbo = turbo.isChecked();
+        String missingDit = useTurbo ? QwenImage21.missingTurboDitFiles(modelDir)
+                : QwenImage21.missingStandardDitFiles(modelDir);
+        if (missingDit != null) {
+            showError("Missing files", (useTurbo ? "Turbo" : "Standard") + " model needs: " + missingDit
+                    + "\n\nCheck it above and tap Download.");
+            return;
+        }
         if (editMode && QwenImage21.missingEditFiles(modelDir) != null) {
             showError("Missing files", "Image edit needs: " + QwenImage21.missingEditFiles(modelDir));
             return;
@@ -302,7 +350,7 @@ public class MainActivity extends Activity {
         final String text = prompt.getText().toString().trim();
         addHistory(text);
         final boolean edit = editMode;
-        final int nSteps = parse(steps, 20);
+        final int nSteps = useTurbo ? 6 : parse(steps, 20);
         final int nSeed = parse(seed, 42);
         final QwenImage21.Size sz = selectedSize();
         prefs.edit().putInt("ratio", ratio.getSelectedItemPosition())
@@ -311,14 +359,19 @@ public class MainActivity extends Activity {
         options.useGpu = gpu.isChecked();
         options.textEncoderOnCpu = teCpu.isChecked();
         options.keepModelsLoaded = keep.isChecked();
+        options.turbo = useTurbo;
         options.crashMarkerFile = crashMarker;
-        final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded;
+        final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded
+                + "," + options.turbo;
         final File out = new File(getExternalFilesDir(null), "outputs/qwen_" + System.currentTimeMillis() + ".png");
 
         setBusy(true);
         progress.setProgress(0);
-        status.setText(edit ? "Editing… (text encoder + vision → VAE encoder → DiT " + nSteps + " steps → VAE)"
-                : "Generating " + sz.width + "×" + sz.height + "… (text encoder → DiT " + nSteps + " steps → VAE)");
+        String modelNote = useTurbo ? "turbo LoRA, " : "";
+        status.setText(edit ? "Editing… (" + modelNote + "text encoder + vision → VAE encoder → DiT " + nSteps
+                        + " steps → VAE)"
+                : "Generating " + sz.width + "×" + sz.height + "… (" + modelNote + "text encoder → DiT " + nSteps
+                        + " steps → VAE)");
         final long start = SystemClock.elapsedRealtime();
         new Thread(() -> {
             Bitmap bmp = null;
