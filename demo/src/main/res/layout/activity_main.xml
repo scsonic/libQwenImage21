@@ -140,6 +140,46 @@
                 android:layout_height="160dp"
                 android:adjustViewBounds="true"
                 android:scaleType="fitCenter" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/pick2"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="+ 2nd reference (optional)" />
+
+                <Button
+                    android:id="@+id/clear2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Clear" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/input_info2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No 2nd reference. With one, the prompt can refer to &quot;image 1&quot; / &quot;image 2&quot;; the output follows the last image's aspect ratio."
+                android:textSize="12sp" />
+
+            <ImageView
+                android:id="@+id/input_preview2"
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
+
+            <CheckBox
+                android:id="@+id/ref_half"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Shrink each reference to half size (less RAM/time, esp. with 2 references)" />
         </LinearLayout>
 
         <LinearLayout

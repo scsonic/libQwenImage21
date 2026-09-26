@@ -36,17 +36,18 @@ import java.util.List;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_PICK = 1;
+    private static final int REQUEST_PICK2 = 2;
     private static final int MAX_HISTORY = 100;
 
     private EditText prompt, steps, seed;
-    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo;
-    private Button tabT2i, tabI2i, download, generate;
+    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo, refHalf;
+    private Button tabT2i, tabI2i, download, generate, pick2, clear2;
     private View panelT2i, panelI2i;
     private Spinner ratio, tier;
     private ProgressBar progress;
-    private TextView status, inputInfo, sizeInfo;
-    private ImageView image, inputPreview;
-    private File modelDir, inputFile, crashMarker;
+    private TextView status, inputInfo, inputInfo2, sizeInfo;
+    private ImageView image, inputPreview, inputPreview2;
+    private File modelDir, inputFile, inputFile2, crashMarker;
     private boolean editMode;
     private QwenImage21 model;
     private String modelKey;
@@ -77,14 +78,20 @@ public class MainActivity extends Activity {
         progress = findViewById(R.id.progress);
         status = findViewById(R.id.status);
         inputInfo = findViewById(R.id.input_info);
+        inputInfo2 = findViewById(R.id.input_info2);
         sizeInfo = findViewById(R.id.size_info);
         image = findViewById(R.id.image);
         inputPreview = findViewById(R.id.input_preview);
+        inputPreview2 = findViewById(R.id.input_preview2);
+        pick2 = findViewById(R.id.pick2);
+        clear2 = findViewById(R.id.clear2);
+        refHalf = findViewById(R.id.ref_half);
         image.setBackgroundColor(Color.rgb(0xE0, 0xE0, 0xE0));  // shows transparent (RGBA) output
 
         prefs = getSharedPreferences("demo", MODE_PRIVATE);
         modelDir = new File(getExternalFilesDir(null), "qwen_image21");
         inputFile = new File(getFilesDir(), "edit_input.img");
+        inputFile2 = new File(getFilesDir(), "edit_input2.img");
         crashMarker = new File(getFilesDir(), "generation_in_progress.txt");
 
         ratio.setAdapter(spinnerAdapter(QwenImage21.Size.Ratio.values()));
@@ -112,9 +119,14 @@ public class MainActivity extends Activity {
         tabT2i.setOnClickListener(v -> setEditMode(false));
         tabI2i.setOnClickListener(v -> setEditMode(true));
         findViewById(R.id.history).setOnClickListener(v -> showHistory());
-        findViewById(R.id.pick).setOnClickListener(v -> pickImage());
+        findViewById(R.id.pick).setOnClickListener(v -> pickImage(REQUEST_PICK));
+        pick2.setOnClickListener(v -> pickImage(REQUEST_PICK2));
+        clear2.setOnClickListener(v -> clearImage2());
         download.setOnClickListener(v -> startDownload());
         generate.setOnClickListener(v -> startGeneration());
+
+        refHalf.setChecked(prefs.getBoolean("refHalf", false));
+        refHalf.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("refHalf", c).apply());
 
         dlStandard.setText(String.format("Standard (dit.mnn) — %.1f GB",
                 QwenImage21.STANDARD_DIT_SIZE_BYTES / 1e9));
@@ -142,6 +154,7 @@ public class MainActivity extends Activity {
         setEditMode(prefs.getBoolean("editMode", false));
         refreshModelStatus();
         if (inputFile.isFile()) showInput();
+        if (inputFile2.isFile()) showInput2();
 
         // A previous run killed by the system (low-memory killer) left its marker behind.
         String crash = QwenImage21.readCrashMarker(crashMarker);
@@ -195,21 +208,26 @@ public class MainActivity extends Activity {
         QwenImage21.Size s = selectedSize();
         sizeInfo.setText(String.format("Output %d×%d · %d latent tokens per step", s.width, s.height, s.tokens()));
         if (inputFile.isFile()) showInput();
+        if (inputFile2.isFile()) showInput2();
     }
 
-    private void pickImage() {
+    private void pickImage(int requestCode) {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("image/*");
-        startActivityForResult(Intent.createChooser(intent, "Choose image"), REQUEST_PICK);
+        startActivityForResult(Intent.createChooser(intent, "Choose image"), requestCode);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_PICK || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if ((requestCode != REQUEST_PICK && requestCode != REQUEST_PICK2) || resultCode != RESULT_OK || data == null
+                || data.getData() == null) {
+            return;
+        }
+        File dest = requestCode == REQUEST_PICK ? inputFile : inputFile2;
         Uri uri = data.getData();
         try (InputStream in = getContentResolver().openInputStream(uri);
-             OutputStream out = new FileOutputStream(inputFile)) {
+             OutputStream out = new FileOutputStream(dest)) {
             byte[] buf = new byte[1 << 16];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
@@ -217,7 +235,15 @@ public class MainActivity extends Activity {
             status.setText("Cannot read image: " + e.getMessage());
             return;
         }
-        showInput();
+        if (requestCode == REQUEST_PICK) showInput(); else showInput2();
+    }
+
+    private void clearImage2() {
+        if (inputFile2.isFile()) inputFile2.delete();
+        inputPreview2.setVisibility(View.GONE);
+        inputInfo2.setText("No 2nd reference. With one, the prompt can refer to \"image 1\" / \"image 2\"; the "
+                + "output follows the last image's aspect ratio.");
+        if (inputFile.isFile()) showInput();  // image 1 alone decides the output again
     }
 
     private void showInput() {
@@ -232,8 +258,34 @@ public class MainActivity extends Activity {
         BitmapFactory.Options b = new BitmapFactory.Options();
         b.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(inputFile.getAbsolutePath(), b);
+        boolean decidesOutput = !inputFile2.isFile();
+        if (decidesOutput) {
+            int[] out = QwenImage21.editSize(b.outWidth, b.outHeight, selectedTier());
+            inputInfo.setText(String.format("Reference 1: %d×%d → output %d×%d", b.outWidth, b.outHeight, out[0],
+                    out[1]));
+        } else {
+            inputInfo.setText(String.format("Reference 1: %d×%d", b.outWidth, b.outHeight));
+        }
+    }
+
+    /** Reference 2, when present, is the *last* reference, so it (not reference 1) decides the output's aspect. */
+    private void showInput2() {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inSampleSize = 4;
+        Bitmap bmp = BitmapFactory.decodeFile(inputFile2.getAbsolutePath(), o);
+        if (bmp == null) {
+            inputInfo2.setText("Unsupported image");
+            return;
+        }
+        inputPreview2.setVisibility(View.VISIBLE);
+        inputPreview2.setImageBitmap(bmp);
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(inputFile2.getAbsolutePath(), b);
         int[] out = QwenImage21.editSize(b.outWidth, b.outHeight, selectedTier());
-        inputInfo.setText(String.format("Input %d×%d → output %d×%d", b.outWidth, b.outHeight, out[0], out[1]));
+        inputInfo2.setText(String.format("Reference 2: %d×%d → output %d×%d", b.outWidth, b.outHeight, out[0],
+                out[1]));
+        if (inputFile.isFile()) showInput();  // reference 1's info no longer claims to decide the output
     }
 
     // ------------------------------------------------------------------------------------------ prompt history
@@ -350,6 +402,7 @@ public class MainActivity extends Activity {
         final String text = prompt.getText().toString().trim();
         addHistory(text);
         final boolean edit = editMode;
+        final boolean hasRef2 = edit && inputFile2.isFile();
         final int nSteps = useTurbo ? 6 : parse(steps, 20);
         final int nSeed = parse(seed, 42);
         final QwenImage21.Size sz = selectedSize();
@@ -360,6 +413,7 @@ public class MainActivity extends Activity {
         options.textEncoderOnCpu = teCpu.isChecked();
         options.keepModelsLoaded = keep.isChecked();
         options.turbo = useTurbo;
+        options.refSize = refHalf.isChecked() ? QwenImage21.RefSize.HALF : QwenImage21.RefSize.FULL;
         options.crashMarkerFile = crashMarker;
         final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded
                 + "," + options.turbo;
@@ -368,8 +422,8 @@ public class MainActivity extends Activity {
         setBusy(true);
         progress.setProgress(0);
         String modelNote = useTurbo ? "turbo LoRA, " : "";
-        status.setText(edit ? "Editing… (" + modelNote + "text encoder + vision → VAE encoder → DiT " + nSteps
-                        + " steps → VAE)"
+        status.setText(edit ? "Editing" + (hasRef2 ? " (2 references)" : "") + "… (" + modelNote
+                        + "text encoder + vision → VAE encoder → DiT " + nSteps + " steps → VAE)"
                 : "Generating " + sz.width + "×" + sz.height + "… (" + modelNote + "text encoder → DiT " + nSteps
                         + " steps → VAE)");
         final long start = SystemClock.elapsedRealtime();
@@ -383,7 +437,8 @@ public class MainActivity extends Activity {
                     modelKey = key;
                 }
                 QwenImage21.ProgressListener listener = p -> runOnUiThread(() -> progress.setProgress(p));
-                bmp = edit ? model.edit(text, inputFile, sz.tier, nSteps, nSeed, out, listener)
+                bmp = edit ? model.edit(text, inputFile, hasRef2 ? inputFile2 : null, sz.tier, nSteps, nSeed, out,
+                                listener)
                         : model.generate(text, sz, nSteps, nSeed, out, listener);
             } catch (QwenImage21Exception e) {
                 error = e;

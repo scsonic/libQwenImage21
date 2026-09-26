@@ -43,10 +43,11 @@ public:
     // Denoise from seeded noise against a prefix K/V of length prefixLen; returns packed latents [1, N, 64].
     VARP denoise(const std::vector<VARP>& prefixKV, int prefixLen, const float* cosTarget, const float* sinTarget, int steps, int seed,
                  std::function<void(int)> progressCallback);
-    // Image editing: one condition image (also chosen by run(..., inputImagePath)). Output keeps the input's
-    // aspect ratio at the configured pixel area.
-    bool runEdit(const std::string& prompt, const std::string& inputImagePath, const std::string& outputPath,
-                 int steps, int seed, std::function<void(int)> progressCallback);
+    // Image editing: 1-2 condition images (run(..., inputImagePath) always passes exactly one; the second is
+    // opt-in, see runEdit()/setRefAreaScale() below). Output keeps the *last* image's aspect ratio at the
+    // configured pixel area, matching how Qwen-Image-2.1 itself picks the output shape when none is given.
+    bool runEdit(const std::string& prompt, const std::vector<std::string>& inputImagePaths,
+                 const std::string& outputPath, int steps, int seed, std::function<void(int)> progressCallback);
     // Packed latents -> RGBA [1, 4, H, W] in [-1, 1].
     VARP decode(VARP packedLatents);
     static bool saveRGBA(VARP image, const std::string& path);
@@ -62,6 +63,13 @@ public:
     // LoRALinear). Takes effect on the next run()/runEdit(); forces the step count to 6 either way, since the
     // LoRA was distilled against that exact sigma schedule (see sigmas()).
     void setTurbo(bool on) override;
+    // Each edit reference image is independently resized (own aspect ratio kept) to `scale` times the configured
+    // output area before VAE/vision encoding; the output's own size is unaffected (always computed from the last
+    // reference at scale 1.0 -- see editSize()). 1.0 is the original single-reference behaviour (reference ==
+    // output size). With two references at 0.5 each, the combined condition-token count is about the same as one
+    // reference at 1.0, so RAM/step time stay roughly where a single-reference edit is today; at 1.0 each, two
+    // references cost roughly twice that. Clamped to (0, 1].
+    void setRefAreaScale(double scale);
     // MemAvailable from /proc/meminfo in MB, or -1 where it is unavailable.
     static int availableMemoryMB();
 
@@ -83,9 +91,14 @@ private:
     std::vector<VARP> runPrefix(VARP hidden, const std::vector<float>& cosTab, const std::vector<float>& sinTab,
                    const std::vector<float>& mask);
     VARP embedText(VARP textHidden);
-    VARP encodeEditPrompt(const std::string& prompt, VARP bgr, int w, int h, std::vector<char>& isPad);
+    struct RefImage { VARP bgr, rgb; int w, h; };
+    VARP encodeEditPrompt(const std::string& prompt, const std::vector<RefImage>& refs, std::vector<char>& isPad);
     VARP encodeImage(VARP rgb, int w, int h);
+    // Output size/aspect (used for the last reference and the generated image): same area as configured, aspect
+    // from (srcW, srcH).
     void editSize(int srcW, int srcH, int& w, int& h) const;
+    // A single reference image's own encode size: same area rule, scaled by mRefAreaScale.
+    void condSize(int srcW, int srcH, int& w, int& h) const;
     // Returns false and records kOutOfMemory when the device has less than needMB (+margin) available.
     bool ensureMemory(const char* stage, int needMB);
     bool fail(int code, const std::string& message);
@@ -99,6 +112,7 @@ private:
     int mLatentW = 32;
     bool mTurbo = false;
     std::string mDitFile = "dit.mnn";
+    double mRefAreaScale = 1.0;
     int mDropIdx = 14;
     std::string mTeOutputName = "/Add_182_output_0";
     std::shared_ptr<Transformer::Llm> mTextEncoder;

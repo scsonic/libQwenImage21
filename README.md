@@ -51,13 +51,14 @@ one into different outfits. Details, more samples and per-step timings: **[docs/
 
 | | |
 |---|---|
-| Modes | text-to-image, image editing (one input image) |
+| Modes | text-to-image, image editing (1–2 reference images — [docs/MULTI_REF.md](docs/MULTI_REF.md)) |
 | Resolution | any size, sides a multiple of 32, 256×256 up; 7 ratios × 3 pixel budgets in the UI ([Sizes](#sizes)) |
 | Tested device | Snapdragon 8 Gen 2 (Adreno 740), 16 GB RAM, Android 13 |
 | Speed | ~19 s/step on OpenCL fp16 at ~512² · ~451 s for 20 steps end to end |
 | Model download | ~10.3 GB (text encoder + vision 5.4 GB, DiT 4.5 GB, VAE 0.7 GB) |
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
 | Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +5.2 GB (own copy of the base weights + the LoRA). Opt-in in the app (a download checkbox + a Turbo LoRA checkbox) — [docs/TURBO.md](docs/TURBO.md) |
+| Multi-reference editing (experimental) | A 2nd reference image, no new model files. Each reference can be independently shrunk to save RAM/time — [docs/MULTI_REF.md](docs/MULTI_REF.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|
@@ -115,6 +116,9 @@ try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
                            new File(context.getCacheDir(), "a.png"), p -> Log.d("QI", p + "%"));
     Bitmap b = qi.edit("Change the background to a sunset beach", inputJpgOrPng,
                        QwenImage21.Size.Tier.STANDARD, 20, 42, new File(context.getCacheDir(), "b.png"), null);
+    // Optional 2nd reference image (docs/MULTI_REF.md); inputJpgOrPng2 may be null.
+    Bitmap c = qi.edit("Combine the two references as described", inputJpgOrPng, inputJpgOrPng2,
+                       QwenImage21.Size.Tier.STANDARD, 20, 42, new File(context.getCacheDir(), "c.png"), null);
 } catch (QwenImage21Exception e) {
     if (e.isOutOfMemory()) { /* the instance is still usable — retry later */ }
 }
@@ -128,7 +132,8 @@ try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
 - Output is **RGBA** — Qwen-Image-2.1 can generate transparent images directly.
 - `Options`: `useGpu` (DiT on OpenCL, default true), `textEncoderOnCpu` (true), `vaeOnCpu` (true), `keepModelsLoaded`
   (false — faster repeats, more RAM), `threads` (4), `turbo` (false — [Turbo mode](docs/TURBO.md), needs
-  `dit_turbo.mnn`, forces 6 steps). Logcat tags: `MNNJNI`, `QwenImage21`.
+  `dit_turbo.mnn`, forces 6 steps), `refSize` (`FULL` — [2nd reference image](docs/MULTI_REF.md), `HALF` shrinks
+  each reference's area to save RAM/time). Logcat tags: `MNNJNI`, `QwenImage21`.
 
 ## Command line (adb)
 
@@ -144,9 +149,12 @@ adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo <mod
 ```
 
 `<model_dir> <out.png> <prompt> [steps=20] [seed=42] [opencl|cpu] [memory_mode=0] [te_on_cpu=1] [size=512|WxH]
-[precision=low|normal|high] [threads=4] [vae_on_cpu=0] [input_image] [turbo=0]`. In edit mode `size` is the pixel
-budget only (output keeps the input's ratio). `turbo=1` loads `dit_turbo.mnn` and forces `steps` to 6 — see
-[docs/TURBO.md](docs/TURBO.md). `QWEN_IMAGE21_DUMP=<dir>` dumps intermediate tensors (`export/compare_dump.py`).
+[precision=low|normal|high] [threads=4] [vae_on_cpu=0] [input_image] [turbo=0] [input_image2] [ref_area_scale=1.0]`.
+In edit mode `size` is the pixel budget only (output keeps the *last* reference's ratio). `turbo=1` loads
+`dit_turbo.mnn` and forces `steps` to 6 — see [docs/TURBO.md](docs/TURBO.md). `input_image2` adds a 2nd reference
+(optional) and `ref_area_scale` shrinks each reference's area (e.g. `0.5`) — see
+[docs/MULTI_REF.md](docs/MULTI_REF.md). `QWEN_IMAGE21_DUMP=<dir>` dumps intermediate tensors
+(`export/compare_dump.py`).
 
 ## Sizes
 
@@ -255,7 +263,8 @@ Verification scripts in `export/`: `test_equiv.py` (re-implementation vs. diffus
 - **VAE on GPU** exhausted memory at 512×512 and rebooted the test phone, so it runs on CPU (still 4.3 GB peak at
   448×576); tiled decoding is next.
 - Stages load one at a time and release after use; phones under 12 GB RAM are untested.
-- Editing takes one input image (Qwen-Image-2.1 supports up to 10); its longer prefix costs about one extra step.
+- Editing takes 1–2 input images (Qwen-Image-2.1 supports up to 10 — [docs/MULTI_REF.md](docs/MULTI_REF.md)); each
+  reference's tokens lengthen the prefix, costing roughly one extra step's worth of time per reference.
 - CPU `Memory_Low` (dynamic int8 GEMM) returned wrong results for long prefixes, so the CPU DiT uses `Memory_Normal`.
 - No CFG (this model is meant to run without it). Default 20 steps; official default is 40.
 
@@ -308,7 +317,7 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
 - **轉檔重點**：DiT 直接用 GGUF Q4_K，無損搬進 MNN int4（block 32）。文字編碼器與 Qwen3-VL-8B-Instruct 權重相同，
   直接用現成的 MNN 版。VAE 用殘差流 ÷256 + RMSNorm 預除 max|x|，讓 fp16 不溢位。K/V cache 拆成每層一個張量，
   避免單一張量超過 OpenCL 單一 buffer 上限（編輯模式常見）。
-- **已知限制**：每步約 19 秒；VAE 在 GPU 上會吃爆記憶體，所以目前跑在 CPU；編輯只支援一張輸入圖；建議 12 GB
+- **已知限制**：每步約 19 秒；VAE 在 GPU 上會吃爆記憶體，所以目前跑在 CPU；編輯最多支援兩張參考圖；建議 12 GB
   以上 RAM。
 - **Turbo（實驗中）**：套用 [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA，6
   步取代原本的 20–40 步，總時間約減半。用「不合併」的方式做（原本的 int4 權重完全不動，LoRA 另外存成一個
@@ -316,6 +325,9 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
   LoRA），隨時可切換回原本模型。App 下載畫面可以分別勾選要下載 Standard / Turbo 模型（可以只裝一個或兩個都裝），
   另外有一個「Turbo LoRA」勾選框決定這次生成要用哪個模型，勾選後 Steps 會鎖定顯示 6。範例圖與細節見
   [docs/TURBO.md](docs/TURBO.md)。
+- **雙參考圖編輯（實驗中）**：編輯模式可以再加一張參考圖（不需要新的模型檔案，純運算邏輯）。每張參考圖可以獨立
+  縮小面積（縮到一半的話,兩張參考圖加起來的成本大約等於今天單張全尺寸），輸出本身的尺寸不受影響。細節見
+  [docs/MULTI_REF.md](docs/MULTI_REF.md)。
 - **CI**：每次 push 到 `main` 或打 tag，GitHub Actions 都會自動編出 APK/AAR（檔名含版號與 commit hash），
   打 `v*` tag 還會自動附加到對應的 GitHub Release。
 - **授權**：程式碼 Apache-2.0；模型依 Qwen Research License。

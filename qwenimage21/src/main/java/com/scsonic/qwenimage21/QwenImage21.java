@@ -189,10 +189,33 @@ public final class QwenImage21 implements AutoCloseable {
          */
         public boolean turbo = false;
         /**
+         * How large a slice of the configured output area each {@link #edit} reference image is encoded at (own
+         * aspect ratio kept either way; the *output*'s own size always stays at {@link Size.Tier#side}² regardless
+         * of this setting). {@link RefSize#FULL} is the original single-reference behaviour. With two references,
+         * {@link RefSize#HALF} keeps the combined prefix (and RAM/step time) about where a single {@link #FULL}
+         * reference is today; {@link RefSize#FULL} on two references roughly doubles both.
+         */
+        public RefSize refSize = RefSize.FULL;
+        /**
          * Optional file used to detect runs killed by the system (e.g. low-memory killer): it holds the current stage
          * while generating and is deleted afterwards. Read it at startup with {@link #readCrashMarker(File)}.
          */
         public File crashMarkerFile;
+    }
+
+    /** How much of the configured output area an {@link #edit} reference image is encoded at. See
+     * {@link Options#refSize}. */
+    public enum RefSize {
+        /** Reference encoded at the same area as the output (today's single-reference behaviour). */
+        FULL(1.0f),
+        /** Reference encoded at half the output's area -- lower detail, less RAM and time per reference. */
+        HALF(0.5f);
+
+        public final float scale;
+
+        RefSize(float scale) {
+            this.scale = scale;
+        }
     }
 
     public interface ProgressListener {
@@ -229,7 +252,7 @@ public final class QwenImage21 implements AutoCloseable {
     public Bitmap generate(String prompt, int width, int height, int steps, int seed, File outputPng,
                            ProgressListener listener) {
         String settings = "text-to-image " + width + "x" + height + ", " + actualSteps(steps) + " steps";
-        run(prompt, null, width, height, steps, seed, outputPng, listener, settings);
+        run(prompt, null, null, width, height, steps, seed, outputPng, listener, settings);
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
     }
 
@@ -244,8 +267,20 @@ public final class QwenImage21 implements AutoCloseable {
      */
     public Bitmap edit(String prompt, File inputImage, Size.Tier tier, int steps, int seed, File outputPng,
                        ProgressListener listener) {
-        String settings = "image edit ~" + tier.side + "² px, " + actualSteps(steps) + " steps";
-        run(prompt, inputImage.getAbsolutePath(), tier.side, tier.side, steps, seed, outputPng, listener, settings);
+        return edit(prompt, inputImage, null, tier, steps, seed, outputPng, listener);
+    }
+
+    /**
+     * Image editing with one or two condition images ({@code inputImage2} may be null). With two images, the prompt
+     * can refer to "image 1" / "image 2" in that order; the output's aspect ratio follows the *last* one given.
+     * Each reference is independently resized to {@link Options#refSize} of the tier's pixel area (own aspect kept).
+     */
+    public Bitmap edit(String prompt, File inputImage, File inputImage2, Size.Tier tier, int steps, int seed,
+                       File outputPng, ProgressListener listener) {
+        String settings = "image edit ~" + tier.side + "² px" + (inputImage2 != null ? ", 2 references" : "")
+                + ", " + actualSteps(steps) + " steps";
+        run(prompt, inputImage.getAbsolutePath(), inputImage2 != null ? inputImage2.getAbsolutePath() : null,
+                tier.side, tier.side, steps, seed, outputPng, listener, settings);
         return BitmapFactory.decodeFile(outputPng.getAbsolutePath());
     }
 
@@ -257,8 +292,8 @@ public final class QwenImage21 implements AutoCloseable {
                 Math.max(256, (int) Math.round(fw / ar / 32.0) * 32)};
     }
 
-    private synchronized void run(String prompt, String input, int width, int height, int steps, int seed,
-                                  File outputPng, ProgressListener listener, String settings) {
+    private synchronized void run(String prompt, String input, String input2, int width, int height, int steps,
+                                  int seed, File outputPng, ProgressListener listener, String settings) {
         if (handle == 0) throw new IllegalStateException("closed");
         File parent = outputPng.getAbsoluteFile().getParentFile();
         if (parent != null) parent.mkdirs();
@@ -270,8 +305,8 @@ public final class QwenImage21 implements AutoCloseable {
         };
         int code;
         try {
-            code = nativeGenerate(handle, prompt, input, outputPng.getAbsolutePath(), steps, seed, width, height,
-                    options.turbo, wrapped);
+            code = nativeGenerate(handle, prompt, input, input2, outputPng.getAbsolutePath(), steps, seed, width,
+                    height, options.turbo, options.refSize.scale, wrapped);
         } finally {
             marker.clear();
         }
@@ -324,9 +359,9 @@ public final class QwenImage21 implements AutoCloseable {
     }
 
     private static String describe(Options o) {
-        return (o.turbo ? "turbo, " : "") + "DiT " + (o.useGpu ? "GPU" : "CPU") + ", text encoder "
-                + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE " + (o.vaeOnCpu ? "CPU" : "GPU")
-                + (o.keepModelsLoaded ? ", keep models loaded" : "");
+        return (o.turbo ? "turbo, " : "") + (o.refSize == RefSize.HALF ? "ref@half, " : "") + "DiT "
+                + (o.useGpu ? "GPU" : "CPU") + ", text encoder " + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE "
+                + (o.vaeOnCpu ? "CPU" : "GPU") + (o.keepModelsLoaded ? ", keep models loaded" : "");
     }
 
     @Override
@@ -340,9 +375,9 @@ public final class QwenImage21 implements AutoCloseable {
     private static native long nativeCreate(String modelDir, boolean useGpu, boolean textEncoderOnCpu,
                                             boolean vaeOnCpu, int memoryMode, int threads);
 
-    private static native int nativeGenerate(long handle, String prompt, String inputImage, String outputPng,
-                                             int steps, int seed, int width, int height, boolean turbo,
-                                             ProgressListener listener);
+    private static native int nativeGenerate(long handle, String prompt, String inputImage, String inputImage2,
+                                             String outputPng, int steps, int seed, int width, int height,
+                                             boolean turbo, float refAreaScale, ProgressListener listener);
 
     private static native String nativeLastError(long handle);
 

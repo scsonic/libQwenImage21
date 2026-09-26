@@ -268,3 +268,76 @@ def edit_layout(is_pad, hc, wc, H, W, axes=(16, 56, 56), theta=10000.0):
     m = torch.full((P, P + 1), -30000.0)
     m[:, 1:][allowed] = 0.0
     return t1, t2, torch.cos(ang), torch.sin(ang), m.reshape(1, 1, P, P + 1)
+
+
+def edit_layout_n(is_pad, images, H, W, axes=(16, 56, 56), theta=10000.0):
+    """Generalizes edit_layout to N (1 or 2 in practice) condition images, matching
+    QwenImage21Rope.forward / QwenImage21Transformer2DModel.build_token_metadata for a list of img_shapes.
+
+    is_pad: bool list over the text-encoder tokens, True at <|image_pad|> slots (each stands for 2x2 latent
+            tokens); the runs for the N images appear in order but need not be contiguous with each other.
+    images: list of (hc, wc), condition images in prompt order (<image1>, <image2>, ...).
+    Returns (P, cos, sin, prefix_mask): the joint prefix is [text][image_0 latents][text]...[image_{N-1}
+    latents][text] (P tokens total), cos/sin cover prefix + target (H*W) tokens, and prefix_mask is
+    [1,1,P,P+1] with a leading dummy key. N=1 reproduces edit_layout's own (cos, sin, mask) exactly.
+    """
+    def grid(h, w):
+        hh = torch.arange(-(h - h // 2), h // 2).repeat_interleave(w)
+        ww = torch.arange(-(w - w // 2), w // 2).repeat(h)
+        return hh, ww
+
+    L = len(is_pad)
+    pad_positions = [i for i, p in enumerate(is_pad) if p]
+    assert len(pad_positions) == sum(hc * wc // 4 for hc, wc in images)
+
+    frame_parts, hpos_parts, wpos_parts, block_parts = [], [], [], []
+    cursor, slot_cursor, position = 0, 0, 0
+    for bi, (hc, wc) in enumerate(images):
+        nslots = hc * wc // 4
+        first_pad = pad_positions[slot_cursor]
+        last_pad = pad_positions[slot_cursor + nslots - 1]
+        assert last_pad - first_pad + 1 == nslots, "vision slots for one reference are not contiguous"
+        text_len = first_pad - cursor
+        if text_len > 0:
+            frame_parts.append(torch.arange(position, position + text_len))
+            hpos_parts.append(torch.arange(position, position + text_len))
+            wpos_parts.append(torch.arange(position, position + text_len))
+            block_parts.append(torch.full((text_len,), -1))
+            position += text_len
+        nc = hc * wc
+        ch, cw = grid(hc, wc)
+        frame_parts.append(torch.full((nc,), position))
+        hpos_parts.append(ch)
+        wpos_parts.append(cw)
+        block_parts.append(torch.full((nc,), bi))
+        position += max(hc, wc)
+        cursor, slot_cursor = first_pad + nslots, slot_cursor + nslots
+
+    if cursor < L:
+        text_len = L - cursor
+        frame_parts.append(torch.arange(position, position + text_len))
+        hpos_parts.append(torch.arange(position, position + text_len))
+        wpos_parts.append(torch.arange(position, position + text_len))
+        block_parts.append(torch.full((text_len,), -1))
+        position += text_len
+
+    P = sum(t.numel() for t in frame_parts)
+    th, tw = grid(H, W)
+    frame_parts.append(torch.full((H * W,), position))
+    hpos_parts.append(th)
+    wpos_parts.append(tw)
+
+    frame, hpos, wpos = torch.cat(frame_parts), torch.cat(hpos_parts), torch.cat(wpos_parts)
+    block = torch.cat(block_parts)
+
+    def freqs(pos, dim):
+        inv = 1.0 / torch.pow(theta, torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+        return torch.outer(pos.float(), inv)
+
+    ang = torch.cat([freqs(frame, axes[0]), freqs(hpos, axes[1]), freqs(wpos, axes[2])], dim=-1)
+    q = torch.arange(P)[:, None]
+    k = torch.arange(P)[None, :]
+    allowed = (k <= q) | ((block[:, None] == block[None, :]) & (block[:, None] >= 0))
+    m = torch.full((P, P + 1), -30000.0)
+    m[:, 1:][allowed] = 0.0
+    return P, torch.cos(ang), torch.sin(ang), m.reshape(1, 1, P, P + 1)

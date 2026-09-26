@@ -5,6 +5,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <vector>
 #include "diffusion/qwen_image21_diffusion.hpp"
 
 using namespace MNN::DIFFUSION;
@@ -59,8 +60,9 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeCreate(JNIEnv* env, jclass, jstri
 // Returns QwenImage21Diffusion::ErrorCode (0 = ok); the message is available from nativeLastError.
 extern "C" JNIEXPORT jint JNICALL
 Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlong ptr, jstring prompt,
-                                                        jstring inputImage, jstring outputPng, jint steps, jint seed,
-                                                        jint width, jint height, jboolean turbo, jobject listener) {
+                                                        jstring inputImage, jstring inputImage2, jstring outputPng,
+                                                        jint steps, jint seed, jint width, jint height,
+                                                        jboolean turbo, jfloat refAreaScale, jobject listener) {
     auto handle = reinterpret_cast<Handle*>(ptr);
     if (!handle) return QwenImage21Diffusion::kRuntimeError;
     std::lock_guard<std::mutex> lock(handle->mutex);
@@ -75,8 +77,16 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlo
     try {
         handle->model->setTurbo(turbo);  // forces steps to 6 internally when true; no-op when unchanged
         if (width > 0 && height > 0) handle->qwen->setImageSize(width, height);
-        ok = handle->model->run(toString(env, prompt), toString(env, outputPng), steps, seed, 1.0f, cb,
-                                toString(env, inputImage));
+        handle->qwen->setRefAreaScale(refAreaScale > 0 ? refAreaScale : 1.0);
+        std::string img1 = toString(env, inputImage);
+        std::string img2 = toString(env, inputImage2);
+        if (!img2.empty()) {
+            // Second reference image: bypass the single-path run() dispatcher.
+            ok = handle->qwen->runEdit(toString(env, prompt), std::vector<std::string>{img1, img2},
+                                       toString(env, outputPng), steps, seed, cb);
+        } else {
+            ok = handle->model->run(toString(env, prompt), toString(env, outputPng), steps, seed, 1.0f, cb, img1);
+        }
         handle->errorCode = ok ? 0 : handle->qwen->lastErrorCode();
         handle->error = ok ? "" : handle->qwen->lastError();
         if (!ok && handle->errorCode == 0) {
