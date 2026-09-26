@@ -28,7 +28,13 @@ This isn't a hypothetical: on the 16 GB test phone, two Full-scale 512²-area re
 tokens and the run was killed by the system outright (`lowmemorykiller`, "device is not responding") before it
 could even report an `OUT_OF_MEMORY` exception. The same edit with both references at Half completed normally.
 
-## Example
+## Examples
+
+Five edits, all Turbo (6 steps), both references at Half scale, on the same Snapdragon 8 Gen 2 phone: **257–275 s**
+(avg 267 s) — about 25–50 s more than a comparable single-reference turbo edit, mostly a second vision-encoder +
+VAE-encoder pass and a longer (but still Half-scale) prefix.
+
+**Person + scene** — a generated portrait and a photo become one composited scene.
 
 <p>
 <img src="turbo_t2i_studio.png" width="30%"/>
@@ -36,11 +42,44 @@ could even report an `OUT_OF_MEMORY` exception. The same edit with both referenc
 <img src="turbo_edit_2ref_lighthouse.png" width="30%"/>
 </p>
 
-*Reference 1 (a generated portrait) + reference 2 (a photo of a lighthouse at sunset) → "Place the woman from image
-1 standing on the rocky shore in front of the lighthouse from image 2, sunset sky, keep her face and outfit
-unchanged." Turbo, 6 steps, both references at Half scale, 576×448 output: **256.6 s** on a Snapdragon 8 Gen 2 —
-about 25–50 s more than a comparable single-reference turbo edit, mostly a second vision-encoder + VAE-encoder pass
-and a longer (but still Half-scale) prefix.*
+*"Place the woman from image 1 standing on the rocky shore in front of the lighthouse from image 2, sunset sky, keep
+her face and outfit unchanged." 576×448 output, 256.6 s.*
+
+<p>
+<img src="turbo_t2i_kimono.png" width="20%"/>
+<img src="sample_temple_672x384.png" width="35%"/>
+<img src="twin_ref_temple_kimono.png" width="35%"/>
+</p>
+
+*"Place the woman in the kimono from image 1 standing at the temple gate from image 2, misty forest background, soft
+glowing light, keep her face and kimono outfit unchanged." 672×384 output, 274.6 s.*
+
+**Outfit transfer** — the garment from one photo, the person (face, pose, background) from the other.
+
+<p>
+<img src="sample_woman_448x576.png" width="26%"/>
+<img src="gallery_outfit_business.png" width="20%"/>
+<img src="twin_ref_outfit_transfer.png" width="26%"/>
+</p>
+
+*"Put the navy business suit and white blouse from image 2 on the woman in image 1, keep her face, hair, pose and the
+city background from image 1 unchanged." 448×576 output, 270.7 s.*
+
+**Two people, two references, one new photo** — neither person exists in the other's reference image.
+
+<p>
+<img src="male_student_raw.png" width="20%"/>
+<img src="female_student_raw.png" width="20%"/>
+<img src="twin_ref_finger_hearts.png" width="26%"/>
+<img src="twin_ref_peace_park.png" width="26%"/>
+</p>
+
+*Same two references (a generated male and female student portrait), two prompts. Left result: "...both making a
+small finger heart gesture with one hand toward the camera... in a school hallway" (448×576, 273.7 s). Right result:
+"...both raising one hand in a peace sign... in a park under cherry blossom trees" (448×576, 261.2 s) — the pose
+changed as asked, but the background stayed the hallway from the references rather than becoming the requested park;
+editing models tend to be conservative about background changes when the prompt also says to keep faces/outfits
+unchanged, more so than single-reference edits in our experience so far.*
 
 ## Using it
 
