@@ -30,9 +30,10 @@ could even report an `OUT_OF_MEMORY` exception. The same edit with both referenc
 
 ## Examples
 
-Five edits, all Turbo (6 steps), both references at Half scale, on the same Snapdragon 8 Gen 2 phone: **257–275 s**
-(avg 267 s) — about 25–50 s more than a comparable single-reference turbo edit, mostly a second vision-encoder +
-VAE-encoder pass and a longer (but still Half-scale) prefix.
+Five edits below, all Turbo (6 steps) with both references at Half scale, on the same Snapdragon 8 Gen 2 phone.
+At Standard (~512², three examples): **257–275 s**, about 25–50 s more than a comparable single-reference turbo
+edit — mostly a second vision-encoder + VAE-encoder pass and a longer (but still Half-scale) prefix. At Fast
+(~384², the two-person examples, see below for why): **~185 s**.
 
 **Person + scene** — a generated portrait and a photo become one composited scene.
 
@@ -70,16 +71,23 @@ city background from image 1 unchanged." 448×576 output, 270.7 s.*
 <p>
 <img src="male_student_raw.png" width="20%"/>
 <img src="female_student_raw.png" width="20%"/>
-<img src="twin_ref_finger_hearts.png" width="26%"/>
-<img src="twin_ref_peace_park.png" width="26%"/>
+<img src="twin_ref_hallway_fast.png" width="26%"/>
+<img src="twin_ref_hallway_fast2.png" width="26%"/>
 </p>
 
-*Same two references (a generated male and female student portrait), two prompts. Left result: "...both making a
-small finger heart gesture with one hand toward the camera... in a school hallway" (448×576, 273.7 s). Right result:
-"...both raising one hand in a peace sign... in a park under cherry blossom trees" (448×576, 261.2 s) — the pose
-changed as asked, but the background stayed the hallway from the references rather than becoming the requested park;
-editing models tend to be conservative about background changes when the prompt also says to keep faces/outfits
-unchanged, more so than single-reference edits in our experience so far.*
+*Same two references (a generated male and female student portrait), two prompts, both at **Fast** (352×448, not
+Standard). Left: "...both smiling at the camera..." (186.8 s). Right: "...the man giving a thumbs up, the woman
+giving a peace sign..." (185.0 s).*
+
+**This one took several tries, and the fix was lowering the output resolution.** Compositing two *full, distinct*
+people is a harder case than the two above (one reference, or one person + one scene): at Standard (~512²) this
+pipeline repeatedly collapsed the two people into one blended figure, or silently dropped one of them and just
+reproduced a reference almost unchanged — across both Turbo and the base 20-step model, portrait and landscape
+references, similar and very different outfits/backgrounds between the two references. Every one of those Standard
+attempts failed the same way. Switching to **Fast** (~384²) with otherwise the same references and prompt style
+fixed it immediately, twice in a row. We don't have a clean explanation (a 6-step distilled LoRA composing two full
+bodies into a fixed pixel budget is plausibly just harder at a higher token count), but the fix is simple: if a
+two-person edit isn't working, try a smaller size tier before concluding the prompt or references are the problem.
 
 ## Using it
 
