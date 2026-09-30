@@ -47,6 +47,27 @@ one into different outfits. Details, more samples and per-step timings: **[docs/
 <img src="docs/turbo_edit_office.png" width="17%"/>
 </p>
 
+**Tiny VAE (experimental)** — [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE ~1/20th the
+size of the real one, ~217x faster to decode, on the GPU instead of a forced CPU fallback. Four random prompts,
+same seed/steps, real VAE vs. tiny VAE:
+
+<p>
+<img src="docs/vae_cmp_p1_tiny.png" width="24%"/>
+<img src="docs/vae_cmp_p2_tiny.png" width="24%"/>
+<img src="docs/vae_cmp_p3_tiny.png" width="24%"/>
+<img src="docs/vae_cmp_p4_tiny.png" width="24%"/>
+</p>
+
+| Prompt | Real VAE decode / RAM | Tiny VAE decode / RAM | Total time (real → tiny) |
+|---|---|---|---|
+| "A red apple on a wooden table..." | 19.63 s / 4326 MB | 0.57 s¹ / 187 MB | 220.9 s → 202.8 s |
+| "A cat sitting on a windowsill at sunset" | 19.54 s / 4326 MB | 0.09 s / 187 MB | 226.0 s → 202.1 s |
+| "A futuristic city skyline at night..." | 19.54 s / 4326 MB | 0.09 s / 187 MB | 225.9 s → 203.5 s |
+| "A bowl of ramen noodles..., steam rising" | 19.54 s / 4326 MB | 0.09 s / 187 MB | 229.4 s → 207.5 s |
+
+¹ First run after install pays a one-time OpenCL shader-compile cost; every run after that was 0.09 s. Full
+write-up, side-by-side real-vs-tiny image pairs, and how it was exported/verified: **[docs/TINY_VAE.md](docs/TINY_VAE.md)**.
+
 ## Status
 
 | | |
@@ -59,6 +80,7 @@ one into different outfits. Details, more samples and per-step timings: **[docs/
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
 | Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +5.2 GB (own copy of the base weights + the LoRA). Opt-in in the app (a download checkbox + a Turbo LoRA checkbox) — [docs/TURBO.md](docs/TURBO.md) |
 | Multi-reference editing (experimental) | A 2nd reference image, no new model files. Each reference can be independently shrunk to save RAM/time — [docs/MULTI_REF.md](docs/MULTI_REF.md) |
+| Tiny VAE (experimental) | [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE: ~30 MB vs ~660 MB, ~217x faster decode, runs on GPU instead of a forced CPU fallback, near-identical output. Verified on-device; not yet wired into the app UI — [docs/TINY_VAE.md](docs/TINY_VAE.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|
