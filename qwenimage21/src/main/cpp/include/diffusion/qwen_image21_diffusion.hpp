@@ -70,6 +70,13 @@ public:
     // reference at 1.0, so RAM/step time stay roughly where a single-reference edit is today; at 1.0 each, two
     // references cost roughly twice that. Clamped to (0, 1].
     void setRefAreaScale(double scale);
+    // Switches between vae_decoder.mnn/vae_encoder.mnn (the real VAE, ~0.5 GB + 0.16 GB) and
+    // vae_decoder_tiny.mnn/vae_encoder_tiny.mnn (TAEQI2.1, https://huggingface.co/madebyollin/taeqi2_1 -- a
+    // handful of conv layers distilled to match the real VAE's DiT-facing latent directly, ~15 MB each). Same
+    // I/O contract as the real VAE (same tensor names/shapes/value ranges), so nothing else in the pipeline needs
+    // to change. Takes effect on the next decode()/encodeImage() call (the currently-loaded module, if any, is
+    // released immediately so the next one is reloaded from the new file).
+    void setTinyVae(bool on);
     // MemAvailable from /proc/meminfo in MB, or -1 where it is unavailable.
     static int availableMemoryMB();
 
@@ -113,6 +120,9 @@ private:
     bool mTurbo = false;
     std::string mDitFile = "dit.mnn";
     double mRefAreaScale = 1.0;
+    bool mTinyVae = false;
+    std::string mVaeDecFile = "vae_decoder.mnn";
+    std::string mVaeEncFile = "vae_encoder.mnn";
     int mDropIdx = 14;
     std::string mTeOutputName = "/Add_182_output_0";
     std::shared_ptr<Transformer::Llm> mTextEncoder;

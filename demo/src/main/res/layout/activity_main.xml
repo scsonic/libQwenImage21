@@ -222,6 +222,13 @@
             android:text="Turbo LoRA (6 fixed steps, faster, needs dit_turbo.mnn)" />
 
         <CheckBox
+            android:id="@+id/tiny_vae"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Tiny VAE (TAEQI2.1 — faster, less RAM, on GPU — recommended)" />
+
+        <CheckBox
             android:id="@+id/gpu"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -262,6 +269,27 @@
             android:layout_height="wrap_content"
             android:checked="false"
             android:text="Turbo (dit_turbo.mnn) — size unknown" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Download from Hugging Face — VAE model(s) to fetch:"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/dl_tiny_vae"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Tiny VAE (vae_decoder_tiny.mnn + vae_encoder_tiny.mnn) — size unknown" />
+
+        <CheckBox
+            android:id="@+id/dl_real_vae"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="Real VAE (vae_decoder.mnn + vae_encoder.mnn) — size unknown" />
 
         <Button
             android:id="@+id/download"

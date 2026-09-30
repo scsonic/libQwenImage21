@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 100;
 
     private EditText prompt, steps, seed;
-    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo, refHalf;
+    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo, refHalf, tinyVae, dlTinyVae, dlRealVae;
     private Button tabT2i, tabI2i, download, generate, pick2, clear2;
     private View panelT2i, panelI2i;
     private Spinner ratio, tier;
@@ -67,6 +67,9 @@ public class MainActivity extends Activity {
         turbo = findViewById(R.id.turbo);
         dlStandard = findViewById(R.id.dl_standard);
         dlTurbo = findViewById(R.id.dl_turbo);
+        tinyVae = findViewById(R.id.tiny_vae);
+        dlTinyVae = findViewById(R.id.dl_tiny_vae);
+        dlRealVae = findViewById(R.id.dl_real_vae);
         tabT2i = findViewById(R.id.tab_t2i);
         tabI2i = findViewById(R.id.tab_i2i);
         panelT2i = findViewById(R.id.panel_t2i);
@@ -136,6 +139,18 @@ public class MainActivity extends Activity {
         dlTurbo.setChecked(prefs.getBoolean("dlTurbo", false));
         dlStandard.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlStandard", c).apply());
         dlTurbo.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlTurbo", c).apply());
+
+        dlTinyVae.setText(String.format("Tiny VAE (vae_decoder_tiny.mnn + vae_encoder_tiny.mnn) — %.0f MB",
+                QwenImage21.TINY_VAE_SIZE_BYTES / 1e6));
+        dlRealVae.setText(String.format("Real VAE (vae_decoder.mnn + vae_encoder.mnn) — %.1f GB",
+                QwenImage21.REAL_VAE_SIZE_BYTES / 1e9));
+        dlTinyVae.setChecked(prefs.getBoolean("dlTinyVae", true));
+        dlRealVae.setChecked(prefs.getBoolean("dlRealVae", false));
+        dlTinyVae.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlTinyVae", c).apply());
+        dlRealVae.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlRealVae", c).apply());
+
+        tinyVae.setChecked(prefs.getBoolean("tinyVae", true));
+        tinyVae.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("tinyVae", c).apply());
 
         turbo.setChecked(prefs.getBoolean("turbo", false));
         turbo.setOnCheckedChangeListener((b, checked) -> {
@@ -330,6 +345,8 @@ public class MainActivity extends Activity {
     private boolean refreshModelStatus() {
         String missingStd = QwenImage21.missingStandardDitFiles(modelDir);
         String missingTurbo = QwenImage21.missingTurboDitFiles(modelDir);
+        String missingTinyVae = QwenImage21.missingTinyVaeFiles(modelDir);
+        String missingRealVae = QwenImage21.missingRealVaeFiles(modelDir);
         String missingEdit = QwenImage21.missingEditFiles(modelDir);
         if (missingStd != null && missingTurbo != null) {
             status.setText("Models not found in " + modelDir + "\nMissing: " + missingStd
@@ -337,9 +354,16 @@ public class MainActivity extends Activity {
                     + " --local-dir qwen_image21\nadb push qwen_image21 " + modelDir.getParent() + "/");
             return false;
         }
+        if (missingTinyVae != null && missingRealVae != null) {
+            status.setText("No VAE downloaded in " + modelDir + "\nMissing: " + missingTinyVae
+                    + "\n\nCheck Tiny VAE and/or Real VAE above and tap Download.");
+            return false;
+        }
         status.setText("Models: " + modelDir
                 + "\nStandard model (dit.mnn): " + (missingStd == null ? "ready" : "not downloaded")
                 + "\nTurbo model (dit_turbo.mnn): " + (missingTurbo == null ? "ready" : "not downloaded")
+                + "\nTiny VAE: " + (missingTinyVae == null ? "ready" : "not downloaded")
+                + "\nReal VAE: " + (missingRealVae == null ? "ready" : "not downloaded")
                 + (missingEdit != null ? "\nImage edit needs: " + missingEdit : "")
                 + "\nFree memory: " + QwenImage21.availableMemoryMB() + " MB");
         return true;
@@ -355,15 +379,21 @@ public class MainActivity extends Activity {
     private void startDownload() {
         final boolean wantStandard = dlStandard.isChecked();
         final boolean wantTurbo = dlTurbo.isChecked();
+        final boolean wantTinyVae = dlTinyVae.isChecked();
+        final boolean wantRealVae = dlRealVae.isChecked();
         if (!wantStandard && !wantTurbo) {
             showError("Nothing selected", "Check Standard and/or Turbo above first.");
+            return;
+        }
+        if (!wantTinyVae && !wantRealVae) {
+            showError("Nothing selected", "Check Tiny VAE and/or Real VAE above first.");
             return;
         }
         setBusy(true);
         progress.setProgress(0);
         new Thread(() -> {
             try {
-                new ModelDownloader().download(modelDir, wantStandard, wantTurbo, true,
+                new ModelDownloader().download(modelDir, wantStandard, wantTurbo, true, wantTinyVae, wantRealVae,
                         (file, done, total) -> runOnUiThread(() -> {
                     progress.setProgress((int) (100 * done / Math.max(1, total)));
                     // file is "verifying <name>" while an existing file is checked against the repo
@@ -384,10 +414,18 @@ public class MainActivity extends Activity {
     private void startGeneration() {
         if (!refreshModelStatus()) return;
         final boolean useTurbo = turbo.isChecked();
+        final boolean useTinyVae = tinyVae.isChecked();
         String missingDit = useTurbo ? QwenImage21.missingTurboDitFiles(modelDir)
                 : QwenImage21.missingStandardDitFiles(modelDir);
         if (missingDit != null) {
             showError("Missing files", (useTurbo ? "Turbo" : "Standard") + " model needs: " + missingDit
+                    + "\n\nCheck it above and tap Download.");
+            return;
+        }
+        String missingVae = useTinyVae ? QwenImage21.missingTinyVaeFiles(modelDir)
+                : QwenImage21.missingRealVaeFiles(modelDir);
+        if (missingVae != null) {
+            showError("Missing files", (useTinyVae ? "Tiny" : "Real") + " VAE needs: " + missingVae
                     + "\n\nCheck it above and tap Download.");
             return;
         }
@@ -414,14 +452,18 @@ public class MainActivity extends Activity {
         options.keepModelsLoaded = keep.isChecked();
         options.turbo = useTurbo;
         options.refSize = refHalf.isChecked() ? QwenImage21.RefSize.HALF : QwenImage21.RefSize.FULL;
+        options.tinyVae = useTinyVae;
+        // vaeOnCpu is fixed at construction (see Options#vaeOnCpu): GPU is only safe with the tiny VAE, so force
+        // CPU whenever the real VAE is selected, regardless of this instance's default.
+        options.vaeOnCpu = !useTinyVae;
         options.crashMarkerFile = crashMarker;
         final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded
-                + "," + options.turbo;
+                + "," + options.turbo + "," + options.vaeOnCpu;
         final File out = new File(getExternalFilesDir(null), "outputs/qwen_" + System.currentTimeMillis() + ".png");
 
         setBusy(true);
         progress.setProgress(0);
-        String modelNote = useTurbo ? "turbo LoRA, " : "";
+        String modelNote = (useTurbo ? "turbo LoRA, " : "") + (useTinyVae ? "" : "real VAE, ");
         status.setText(edit ? "Editing" + (hasRef2 ? " (2 references)" : "") + "… (" + modelNote
                         + "text encoder + vision → VAE encoder → DiT " + nSteps + " steps → VAE)"
                 : "Generating " + sz.width + "×" + sz.height + "… (" + modelNote + "text encoder → DiT " + nSteps

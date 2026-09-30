@@ -51,25 +51,37 @@ public final class ModelDownloader {
 
     /**
      * Downloads every file in {@link QwenImage21#REQUIRED_FILES} and {@link QwenImage21#EDIT_FILES} that is missing,
-     * incomplete or out of date. Equivalent to {@code download(modelDir, true, false, true, listener)}.
+     * incomplete or out of date. Equivalent to {@code download(modelDir, true, false, true, true, false, listener)}.
      */
     public void download(File modelDir, Listener listener) throws IOException {
-        download(modelDir, true, false, true, listener);
+        download(modelDir, true, false, true, true, false, listener);
+    }
+
+    /**
+     * Like the 6-argument overload, with {@code tinyVae = true, realVae = false} (the recommended default --
+     * see {@link QwenImage21.Options#tinyVae}).
+     */
+    public void download(File modelDir, boolean standard, boolean turbo, boolean editFiles, Listener listener)
+            throws IOException {
+        download(modelDir, standard, turbo, editFiles, true, false, listener);
     }
 
     /**
      * Downloads {@link QwenImage21#SHARED_FILES} plus whichever combination of
-     * {@link QwenImage21#STANDARD_DIT_FILES}, {@link QwenImage21#TURBO_DIT_FILES} and
-     * {@link QwenImage21#EDIT_FILES} is selected, skipping anything already present and up to date. At least one of
-     * {@code standard}/{@code turbo} should be true, or nothing will be usable for generation.
+     * {@link QwenImage21#STANDARD_DIT_FILES}, {@link QwenImage21#TURBO_DIT_FILES},
+     * {@link QwenImage21#TINY_VAE_FILES}, {@link QwenImage21#REAL_VAE_FILES} and {@link QwenImage21#EDIT_FILES} is
+     * selected, skipping anything already present and up to date. At least one of {@code standard}/{@code turbo},
+     * and one of {@code tinyVae}/{@code realVae}, should be true, or nothing will be usable for generation.
      */
-    public void download(File modelDir, boolean standard, boolean turbo, boolean editFiles, Listener listener)
-            throws IOException {
+    public void download(File modelDir, boolean standard, boolean turbo, boolean editFiles, boolean tinyVae,
+                         boolean realVae, Listener listener) throws IOException {
         cancelled = false;
         java.util.List<String> list = new java.util.ArrayList<>();
         java.util.Collections.addAll(list, QwenImage21.SHARED_FILES);
         if (standard) java.util.Collections.addAll(list, QwenImage21.STANDARD_DIT_FILES);
         if (turbo) java.util.Collections.addAll(list, QwenImage21.TURBO_DIT_FILES);
+        if (tinyVae) java.util.Collections.addAll(list, QwenImage21.TINY_VAE_FILES);
+        if (realVae) java.util.Collections.addAll(list, QwenImage21.REAL_VAE_FILES);
         if (editFiles) java.util.Collections.addAll(list, QwenImage21.EDIT_FILES);
         String[] files = list.toArray(new String[0]);
         Remote[] remotes = new Remote[files.length];

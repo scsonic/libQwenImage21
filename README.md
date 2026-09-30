@@ -47,9 +47,10 @@ one into different outfits. Details, more samples and per-step timings: **[docs/
 <img src="docs/turbo_edit_office.png" width="17%"/>
 </p>
 
-**Tiny VAE (experimental)** — [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE ~1/20th the
-size of the real one, ~217x faster to decode, on the GPU instead of a forced CPU fallback. Four random prompts,
-same seed/steps, real VAE vs. tiny VAE:
+**Tiny VAE (default)** — [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE ~1/20th the
+size of the real one, ~217x faster to decode, on the GPU instead of a forced CPU fallback. On by default in the app
+and the library; uncheck it (or set `Options.tinyVae = false`) for the original real VAE. Four random prompts, same
+seed/steps, real VAE vs. tiny VAE:
 
 <p>
 <img src="docs/vae_cmp_p1_tiny.png" width="24%"/>
@@ -76,11 +77,11 @@ write-up, side-by-side real-vs-tiny image pairs, and how it was exported/verifie
 | Resolution | any size, sides a multiple of 32, 256×256 up; 7 ratios × 3 pixel budgets in the UI ([Sizes](#sizes)). The model itself trained past 1 megapixel — the UI caps out around ~512² because that's what this phone's RAM can sustain, not a model limit |
 | Tested device | Snapdragon 8 Gen 2 (Adreno 740), 16 GB RAM, Android 13 |
 | Speed | ~19 s/step on OpenCL fp16 at ~512² · ~451 s for 20 steps end to end |
-| Model download | ~10.3 GB (text encoder + vision 5.4 GB, DiT 4.5 GB, VAE 0.7 GB) |
+| Model download | ~9.9 GB by default (text encoder + vision 5.4 GB, DiT 4.5 GB, tiny VAE ~30 MB) — +0.7 GB if you opt into the real VAE instead |
 | Requirements | arm64 Android 8.0+ (API 26), OpenCL GPU, **12 GB+ RAM recommended**, ~11 GB free storage |
 | Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +5.2 GB (own copy of the base weights + the LoRA). Opt-in in the app (a download checkbox + a Turbo LoRA checkbox) — [docs/TURBO.md](docs/TURBO.md) |
 | Multi-reference editing (experimental) | A 2nd reference image, no new model files. Each reference can be independently shrunk to save RAM/time — [docs/MULTI_REF.md](docs/MULTI_REF.md) |
-| Tiny VAE (experimental) | [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE: ~30 MB vs ~660 MB, ~217x faster decode, runs on GPU instead of a forced CPU fallback, near-identical output. Verified on-device; not yet wired into the app UI — [docs/TINY_VAE.md](docs/TINY_VAE.md) |
+| Tiny VAE (default) | [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE: ~30 MB vs ~660 MB, ~217x faster decode, runs on GPU instead of a forced CPU fallback, near-identical output. On by default in the app (a Tiny VAE checkbox) and the library (`Options.tinyVae`) — [docs/TINY_VAE.md](docs/TINY_VAE.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|

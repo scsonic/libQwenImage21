@@ -1,4 +1,4 @@
-# Tiny VAE (experimental): TAEQI2.1, ~215x faster decode, ~30 MB instead of ~660 MB
+# Tiny VAE: TAEQI2.1, ~217x faster decode, ~30 MB instead of ~660 MB, on by default
 
 [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1) is a tiny distilled autoencoder by
 [madebyollin](https://github.com/madebyollin/taesd) — a handful of convolution layers trained to match
@@ -51,6 +51,17 @@ grain/texture, not composition, sharpness or color — see the linked pairs in t
 
 ## Using it
 
+**Demo app:** a **Tiny VAE** checkbox next to Turbo LoRA, checked by default; the download screen has separate
+**Tiny VAE** (~31 MB) and **Real VAE** (~0.7 GB) checkboxes, Tiny checked by default. Unchecking Tiny VAE
+automatically forces the real VAE onto the CPU (see `Options.vaeOnCpu` below) — there's no separate GPU/CPU toggle
+for it in the app, since GPU is only safe with the tiny one.
+
+**Library:** `QwenImage21.Options.tinyVae` (default `true`). `Options.vaeOnCpu` is fixed at construction and
+defaults to `false` (GPU) — if you ever set `tinyVae = false` on an instance, also set `vaeOnCpu = true` on it, or
+risk exhausting GPU memory. `missingTinyVaeFiles(modelDir)` / `missingRealVaeFiles(modelDir)` check which is
+present; `new ModelDownloader().download(modelDir, standard, turbo, editFiles, tinyVae, realVae, listener)` fetches
+whichever combination you ask for.
+
 **CLI:** append `1` as the 17th argument (and `vae_on_cpu=0`, since TAEQI2.1 is meant to run on GPU):
 
 ```bash
@@ -59,8 +70,8 @@ adb shell "cd /data/local/tmp/qwen && LD_LIBRARY_PATH=. ./qwen_image21_demo \
 #                                                                                          ^vae_on_cpu=0        ^tiny_vae=1
 ```
 
-Needs `vae_decoder_tiny.mnn` and `vae_encoder_tiny.mnn` in the model directory (not part of the default download
-yet — see [Files](../README.md#files) once this ships in the app).
+Downloaded by default now (`hf download evankuo/Qwen-Image-2.1-MNN` includes `vae_decoder_tiny.mnn` /
+`vae_encoder_tiny.mnn`); add `--exclude "vae_decoder.mnn" --exclude "vae_encoder.mnn"` to skip the real VAE's ~0.7 GB.
 
 ## How it was made
 
@@ -76,5 +87,6 @@ the input photo essentially unchanged (encoder max abs error 0.0013, decoder 0.0
 
 ## Status
 
-Verified numerically (see above) and on-device (this page). Not yet wired into the demo app's UI or the default
-download — this page is the standalone CLI results; app integration is the next step.
+Verified numerically (see above), on-device (this page), and wired into the demo app and library as the **default**
+VAE (`Options.tinyVae = true`) — opt out with the Real VAE checkbox in the app, or `Options.tinyVae = false` (plus
+`vaeOnCpu = true`) in the library.

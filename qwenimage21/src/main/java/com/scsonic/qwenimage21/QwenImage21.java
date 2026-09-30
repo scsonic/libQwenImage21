@@ -28,9 +28,10 @@ public final class QwenImage21 implements AutoCloseable {
         System.loadLibrary("qwenimage21_jni");
     }
 
-    /** Files needed regardless of which DiT variant ({@link #STANDARD_DIT_FILES} / {@link #TURBO_DIT_FILES}) is used. */
+    /** Files needed regardless of which DiT variant ({@link #STANDARD_DIT_FILES} / {@link #TURBO_DIT_FILES}) or
+     * VAE variant ({@link #TINY_VAE_FILES} / {@link #REAL_VAE_FILES}) is used. */
     public static final String[] SHARED_FILES = {
-            "img_in.mnn", "img_in.mnn.weight", "txt_in.mnn", "txt_in.mnn.weight", "vae_decoder.mnn",
+            "img_in.mnn", "img_in.mnn.weight", "txt_in.mnn", "txt_in.mnn.weight",
             "text_encoder/llm.mnn", "text_encoder/llm.mnn.weight", "text_encoder/embeddings_int4.bin",
             "text_encoder/tokenizer.txt", "text_encoder/llm_config.json", "text_encoder/te_config.json",
             "text_encoder/te_llm_config.json",
@@ -43,16 +44,28 @@ public final class QwenImage21 implements AutoCloseable {
      * {@link Options#turbo} = true. ~5.2 GB — mostly the same base weights again, plus the LoRA's own ~0.7 GB. */
     public static final String[] TURBO_DIT_FILES = {"dit_turbo.mnn", "dit_turbo.mnn.weight"};
 
+    /** <a href="https://huggingface.co/madebyollin/taeqi2_1">TAEQI2.1</a>, a distilled few-conv-layer VAE that
+     * matches the real VAE's latent directly: {@link Options#tinyVae} = true (the default). ~30 MB total, safe to
+     * run on the GPU (see {@link Options#vaeOnCpu}) — see docs/TINY_VAE.md in the repo. */
+    public static final String[] TINY_VAE_FILES = {"vae_decoder_tiny.mnn", "vae_encoder_tiny.mnn"};
+    /** The real Qwen-Image-2.1 VAE: {@link Options#tinyVae} = false. ~660 MB; forced onto CPU regardless of
+     * {@link Options#vaeOnCpu} because it exhausted GPU memory at 512² on the test phone. */
+    public static final String[] REAL_VAE_FILES = {"vae_decoder.mnn", "vae_encoder.mnn"};
+
     /** Approximate download sizes in bytes, for UI labels before anything is downloaded. */
     public static final long STANDARD_DIT_SIZE_BYTES = 4_473_325_942L;
     public static final long TURBO_DIT_SIZE_BYTES = 5_159_749_254L;
+    public static final long TINY_VAE_SIZE_BYTES = 30_628_136L;
+    public static final long REAL_VAE_SIZE_BYTES = 662_810_800L;
 
-    /** Files needed for text-to-image with the standard (non-turbo) model: kept for existing callers. */
-    public static final String[] REQUIRED_FILES = concat(SHARED_FILES, STANDARD_DIT_FILES);
+    /** Files needed for text-to-image with the standard (non-turbo) model and the tiny (default) VAE: kept for
+     * existing callers. */
+    public static final String[] REQUIRED_FILES = concat(concat(SHARED_FILES, STANDARD_DIT_FILES), TINY_VAE_FILES);
 
-    /** Additional files needed for {@link #edit}. */
+    /** Additional files needed for {@link #edit} (the vision tower; the VAE encoder is part of
+     * {@link #TINY_VAE_FILES} / {@link #REAL_VAE_FILES}). */
     public static final String[] EDIT_FILES = {
-            "vae_encoder.mnn", "text_encoder/visual.mnn", "text_encoder/visual.mnn.weight",
+            "text_encoder/visual.mnn", "text_encoder/visual.mnn.weight",
             "text_encoder/te_vl_config.json", "text_encoder/te_vl_llm_config.json",
     };
 
@@ -176,8 +189,11 @@ public final class QwenImage21 implements AutoCloseable {
         public boolean useGpu = true;
         /** Run the Qwen3-VL-8B text encoder on the CPU (recommended; it runs once per prompt). */
         public boolean textEncoderOnCpu = true;
-        /** Run the VAE on the CPU. The OpenCL VAE currently exhausts memory on 16 GB phones. */
-        public boolean vaeOnCpu = true;
+        /** Run the VAE on the CPU. Fixed at construction (unlike {@link #turbo} / {@link #tinyVae}, it can't change
+         * across this instance's lifetime). Default is GPU, safe with the default {@link #tinyVae} = true; if you
+         * also set {@code tinyVae = false} (the real VAE) anywhere in this instance's lifetime, set this to true
+         * too, or risk exhausting GPU memory (it did, once, on the test phone -- see docs/TINY_VAE.md). */
+        public boolean vaeOnCpu = false;
         /** Keep every stage loaded between generations (faster repeats, needs much more RAM). */
         public boolean keepModelsLoaded = false;
         /** CPU threads for the CPU stages. */
@@ -196,6 +212,14 @@ public final class QwenImage21 implements AutoCloseable {
          * reference is today; {@link RefSize#FULL} on two references roughly doubles both.
          */
         public RefSize refSize = RefSize.FULL;
+        /**
+         * Use <a href="https://huggingface.co/madebyollin/taeqi2_1">TAEQI2.1</a> ({@link #TINY_VAE_FILES}), a
+         * distilled VAE ~1/20th the size of the real one and ~200x faster to decode on the GPU, instead of the
+         * real VAE ({@link #REAL_VAE_FILES}, forced onto CPU -- see {@link #vaeOnCpu}). Default true: measured
+         * output is near-identical to the real VAE (docs/TINY_VAE.md). Set false for the real VAE, and set
+         * {@link #vaeOnCpu} = true when you do.
+         */
+        public boolean tinyVae = true;
         /**
          * Optional file used to detect runs killed by the system (e.g. low-memory killer): it holds the current stage
          * while generating and is deleted afterwards. Read it at startup with {@link #readCrashMarker(File)}.
@@ -229,7 +253,8 @@ public final class QwenImage21 implements AutoCloseable {
     /** Loads the runtime; the heavy stages are loaded lazily during generation. */
     public QwenImage21(File modelDir, Options options) {
         Options o = options != null ? options : new Options();
-        String missing = missing(modelDir, concat(SHARED_FILES, o.turbo ? TURBO_DIT_FILES : STANDARD_DIT_FILES));
+        String missing = missing(modelDir, concat(concat(SHARED_FILES, o.turbo ? TURBO_DIT_FILES : STANDARD_DIT_FILES),
+                o.tinyVae ? TINY_VAE_FILES : REAL_VAE_FILES));
         if (missing != null) {
             throw new IllegalArgumentException("Qwen-Image-2.1 model files missing in " + modelDir + ": " + missing);
         }
@@ -306,7 +331,7 @@ public final class QwenImage21 implements AutoCloseable {
         int code;
         try {
             code = nativeGenerate(handle, prompt, input, input2, outputPng.getAbsolutePath(), steps, seed, width,
-                    height, options.turbo, options.refSize.scale, wrapped);
+                    height, options.turbo, options.refSize.scale, options.tinyVae, wrapped);
         } finally {
             marker.clear();
         }
@@ -331,6 +356,16 @@ public final class QwenImage21 implements AutoCloseable {
     /** Null if {@link #SHARED_FILES} + {@link #TURBO_DIT_FILES} all exist, else the missing ones. */
     public static String missingTurboDitFiles(File modelDir) {
         return missing(modelDir, concat(SHARED_FILES, TURBO_DIT_FILES));
+    }
+
+    /** Null if {@link #TINY_VAE_FILES} all exist, else the missing ones. */
+    public static String missingTinyVaeFiles(File modelDir) {
+        return missing(modelDir, TINY_VAE_FILES);
+    }
+
+    /** Null if {@link #REAL_VAE_FILES} all exist, else the missing ones. */
+    public static String missingRealVaeFiles(File modelDir) {
+        return missing(modelDir, REAL_VAE_FILES);
     }
 
     private int actualSteps(int requested) {
@@ -359,9 +394,10 @@ public final class QwenImage21 implements AutoCloseable {
     }
 
     private static String describe(Options o) {
-        return (o.turbo ? "turbo, " : "") + (o.refSize == RefSize.HALF ? "ref@half, " : "") + "DiT "
-                + (o.useGpu ? "GPU" : "CPU") + ", text encoder " + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE "
-                + (o.vaeOnCpu ? "CPU" : "GPU") + (o.keepModelsLoaded ? ", keep models loaded" : "");
+        return (o.turbo ? "turbo, " : "") + (o.refSize == RefSize.HALF ? "ref@half, " : "")
+                + (o.tinyVae ? "" : "real-vae, ") + "DiT " + (o.useGpu ? "GPU" : "CPU") + ", text encoder "
+                + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE " + (o.vaeOnCpu ? "CPU" : "GPU")
+                + (o.keepModelsLoaded ? ", keep models loaded" : "");
     }
 
     @Override
@@ -377,7 +413,8 @@ public final class QwenImage21 implements AutoCloseable {
 
     private static native int nativeGenerate(long handle, String prompt, String inputImage, String inputImage2,
                                              String outputPng, int steps, int seed, int width, int height,
-                                             boolean turbo, float refAreaScale, ProgressListener listener);
+                                             boolean turbo, float refAreaScale, boolean tinyVae,
+                                             ProgressListener listener);
 
     private static native String nativeLastError(long handle);
 
