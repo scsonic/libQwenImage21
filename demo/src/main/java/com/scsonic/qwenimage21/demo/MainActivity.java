@@ -42,14 +42,14 @@ public class MainActivity extends Activity {
     private EditText prompt, steps, seed;
     private CheckBox gpu, teCpu, keep, turbo, dit2Bit, dlStandard, dlTurbo, dl2Bit, dl2BitTurbo, refHalf, tinyVae,
             dlTinyVae, dlRealVae;
-    private Button tabT2i, tabI2i, download, generate, pick2, clear2;
-    private View panelT2i, panelI2i;
+    private Button tabT2i, tabI2i, tabDownload, download, generate, pick2, clear2;
+    private View panelT2i, panelI2i, groupGenerate, panelDownload;
     private Spinner ratio, tier;
     private ProgressBar progress;
-    private TextView status, inputInfo, inputInfo2, sizeInfo;
+    private TextView status, inputInfo, inputInfo2, sizeInfo, hintTurbo, hint2Bit, hintTinyVae;
     private ImageView image, inputPreview, inputPreview2;
     private File modelDir, inputFile, inputFile2, crashMarker;
-    private boolean editMode;
+    private boolean editMode, downloadMode;
     private QwenImage21 model;
     private String modelKey;
     private SharedPreferences prefs;
@@ -76,8 +76,14 @@ public class MainActivity extends Activity {
         dlRealVae = findViewById(R.id.dl_real_vae);
         tabT2i = findViewById(R.id.tab_t2i);
         tabI2i = findViewById(R.id.tab_i2i);
+        tabDownload = findViewById(R.id.tab_download);
         panelT2i = findViewById(R.id.panel_t2i);
         panelI2i = findViewById(R.id.panel_i2i);
+        groupGenerate = findViewById(R.id.group_generate);
+        panelDownload = findViewById(R.id.panel_download);
+        hintTurbo = findViewById(R.id.hint_turbo);
+        hint2Bit = findViewById(R.id.hint_2bit);
+        hintTinyVae = findViewById(R.id.hint_tiny_vae);
         ratio = findViewById(R.id.ratio);
         tier = findViewById(R.id.tier);
         download = findViewById(R.id.download);
@@ -104,7 +110,7 @@ public class MainActivity extends Activity {
         ratio.setAdapter(spinnerAdapter(QwenImage21.Size.Ratio.values()));
         tier.setAdapter(spinnerAdapter(QwenImage21.Size.Tier.values()));
         ratio.setSelection(prefs.getInt("ratio", 0));
-        tier.setSelection(prefs.getInt("tier", 0));
+        tier.setSelection(prefs.getInt("tier", QwenImage21.Size.Tier.TINY.ordinal()));
         AdapterView.OnItemSelectedListener onSize = new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -125,6 +131,7 @@ public class MainActivity extends Activity {
 
         tabT2i.setOnClickListener(v -> setEditMode(false));
         tabI2i.setOnClickListener(v -> setEditMode(true));
+        tabDownload.setOnClickListener(v -> setDownloadMode());
         findViewById(R.id.history).setOnClickListener(v -> showHistory());
         findViewById(R.id.pick).setOnClickListener(v -> pickImage(REQUEST_PICK));
         pick2.setOnClickListener(v -> pickImage(REQUEST_PICK2));
@@ -207,13 +214,26 @@ public class MainActivity extends Activity {
 
     private void setEditMode(boolean edit) {
         editMode = edit;
+        downloadMode = false;
         prefs.edit().putBoolean("editMode", edit).apply();
-        panelT2i.setVisibility(edit ? View.GONE : View.VISIBLE);
-        panelI2i.setVisibility(edit ? View.VISIBLE : View.GONE);
-        tabT2i.setAlpha(edit ? 0.5f : 1f);
-        tabI2i.setAlpha(edit ? 1f : 0.5f);
-        generate.setText(edit ? "Edit image" : "Generate");
-        prompt.setHint(edit ? "Describe the edit, e.g. \"Change the background to a sunset beach\"" : "Prompt");
+        updateTabsAndPanels();
+    }
+
+    private void setDownloadMode() {
+        downloadMode = true;
+        updateTabsAndPanels();
+    }
+
+    private void updateTabsAndPanels() {
+        groupGenerate.setVisibility(downloadMode ? View.GONE : View.VISIBLE);
+        panelDownload.setVisibility(downloadMode ? View.VISIBLE : View.GONE);
+        panelT2i.setVisibility(!downloadMode && !editMode ? View.VISIBLE : View.GONE);
+        panelI2i.setVisibility(!downloadMode && editMode ? View.VISIBLE : View.GONE);
+        tabT2i.setAlpha(!downloadMode && !editMode ? 1f : 0.5f);
+        tabI2i.setAlpha(!downloadMode && editMode ? 1f : 0.5f);
+        tabDownload.setAlpha(downloadMode ? 1f : 0.5f);
+        generate.setText(editMode ? "Edit image" : "Generate");
+        prompt.setHint(editMode ? "Describe the edit, e.g. \"Change the background to a sunset beach\"" : "Prompt");
     }
 
     private <T> ArrayAdapter<T> spinnerAdapter(T[] items) {
@@ -355,7 +375,8 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------------------------------ models
 
-    /** True if at least one of the 4 DiT variants is fully downloaded. */
+    /** True if at least one of the 4 DiT variants is fully downloaded. Also grays out (and explains) any
+     * generate-page option whose model file(s) aren't downloaded yet. */
     private boolean refreshModelStatus() {
         String missingStd = QwenImage21.missingStandardDitFiles(modelDir);
         String missingTurbo = QwenImage21.missingTurboDitFiles(modelDir);
@@ -364,6 +385,14 @@ public class MainActivity extends Activity {
         String missingTinyVae = QwenImage21.missingTinyVaeFiles(modelDir);
         String missingRealVae = QwenImage21.missingRealVaeFiles(modelDir);
         String missingEdit = QwenImage21.missingEditFiles(modelDir);
+
+        setCheckboxAvailability(turbo, hintTurbo, missingTurbo == null || missing2BitTurbo == null,
+                "Needs dit_turbo.mnn or dit_2bit_turbo.mnn — check it in the Download tab.");
+        setCheckboxAvailability(dit2Bit, hint2Bit, missing2Bit == null || missing2BitTurbo == null,
+                "Needs dit_2bit.mnn or dit_2bit_turbo.mnn — check it in the Download tab.");
+        setCheckboxAvailability(tinyVae, hintTinyVae, missingTinyVae == null,
+                "Needs vae_decoder_tiny.mnn + vae_encoder_tiny.mnn — check it in the Download tab.");
+
         if (missingStd != null && missingTurbo != null && missing2Bit != null && missing2BitTurbo != null) {
             status.setText("Models not found in " + modelDir + "\nMissing: " + missingStd
                     + "\n\nTap Download, or push them with:\nhf download " + ModelDownloader.DEFAULT_REPO
@@ -387,11 +416,23 @@ public class MainActivity extends Activity {
         return true;
     }
 
+    /** Disables {@code box} (and unchecks it) when its model file(s) aren't downloaded, showing {@code hint}
+     * explaining what's missing; re-enables and hides the hint otherwise. */
+    private void setCheckboxAvailability(CheckBox box, TextView hint, boolean usable, String hintText) {
+        box.setEnabled(usable);
+        if (!usable) {
+            box.setChecked(false);
+            hint.setText(hintText);
+        }
+        hint.setVisibility(usable ? View.GONE : View.VISIBLE);
+    }
+
     private void setBusy(boolean busy) {
         download.setEnabled(!busy);
         generate.setEnabled(!busy);
         tabT2i.setEnabled(!busy);
         tabI2i.setEnabled(!busy);
+        tabDownload.setEnabled(!busy);
     }
 
     private void startDownload() {

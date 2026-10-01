@@ -37,57 +37,47 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Image Edit" />
-        </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <EditText
-                android:id="@+id/prompt"
+            <Button
+                android:id="@+id/tab_download"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:gravity="top"
-                android:hint="Prompt"
-                android:inputType="textMultiLine"
-                android:minLines="3" />
-
-            <Button
-                android:id="@+id/history"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top"
-                android:text="History" />
+                android:text="Download" />
         </LinearLayout>
 
-        <!-- pixel budget: applies to both tabs -->
+        <!-- everything generation-related; hidden while the Download tab is active -->
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="64dp"
-                android:layout_height="wrap_content"
-                android:text="Size" />
-
-            <Spinner
-                android:id="@+id/tier"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
-
-        <!-- text-to-image options -->
-        <LinearLayout
-            android:id="@+id/panel_t2i"
+            android:id="@+id/group_generate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/prompt"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="top"
+                    android:hint="Prompt"
+                    android:inputType="textMultiLine"
+                    android:minLines="3" />
+
+                <Button
+                    android:id="@+id/history"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top"
+                    android:text="History" />
+            </LinearLayout>
+
+            <!-- pixel budget: applies to both generate tabs -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -97,232 +87,295 @@
                 <TextView
                     android:layout_width="64dp"
                     android:layout_height="wrap_content"
-                    android:text="Ratio" />
+                    android:text="Size" />
 
                 <Spinner
-                    android:id="@+id/ratio"
+                    android:id="@+id/tier"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/size_info"
+            <!-- text-to-image options -->
+            <LinearLayout
+                android:id="@+id/panel_t2i"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="64dp"
-                android:textSize="12sp" />
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="64dp"
+                        android:layout_height="wrap_content"
+                        android:text="Ratio" />
+
+                    <Spinner
+                        android:id="@+id/ratio"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/size_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="64dp"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- image edit options -->
+            <LinearLayout
+                android:id="@+id/panel_i2i"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/pick"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Choose input image" />
+
+                <TextView
+                    android:id="@+id/input_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No image selected. The output keeps the input's aspect ratio at the size chosen above."
+                    android:textSize="12sp" />
+
+                <ImageView
+                    android:id="@+id/input_preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="160dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/pick2"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="+ 2nd reference (optional)" />
+
+                    <Button
+                        android:id="@+id/clear2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Clear" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/input_info2"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No 2nd reference. With one, the prompt can refer to &quot;image 1&quot; / &quot;image 2&quot;; the output follows the last image's aspect ratio."
+                    android:textSize="12sp" />
+
+                <ImageView
+                    android:id="@+id/input_preview2"
+                    android:layout_width="match_parent"
+                    android:layout_height="160dp"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter"
+                    android:visibility="gone" />
+
+                <CheckBox
+                    android:id="@+id/ref_half"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Shrink each reference to half size (less RAM/time, esp. with 2 references)" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Steps" />
+
+                <EditText
+                    android:id="@+id/steps"
+                    android:layout_width="64dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:text="20" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:text="Seed" />
+
+                <EditText
+                    android:id="@+id/seed"
+                    android:layout_width="96dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberSigned"
+                    android:text="42" />
+            </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/turbo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="Turbo LoRA (6 fixed steps, faster, needs dit_turbo.mnn)" />
+
+            <TextView
+                android:id="@+id/hint_turbo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:visibility="gone" />
+
+            <CheckBox
+                android:id="@+id/dit_2bit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="2-bit DiT (smaller/faster, lossier — combines with Turbo)" />
+
+            <TextView
+                android:id="@+id/hint_2bit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:visibility="gone" />
+
+            <CheckBox
+                android:id="@+id/tiny_vae"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Tiny VAE (TAEQI2.1 — faster, less RAM, on GPU — recommended)" />
+
+            <TextView
+                android:id="@+id/hint_tiny_vae"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:textSize="11sp"
+                android:textColor="#888888"
+                android:visibility="gone" />
+
+            <CheckBox
+                android:id="@+id/gpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="DiT on GPU (OpenCL)" />
+
+            <CheckBox
+                android:id="@+id/te_cpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Text encoder on CPU" />
+
+            <CheckBox
+                android:id="@+id/keep"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="Keep models in memory (faster repeat, more RAM)" />
+
+            <Button
+                android:id="@+id/generate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Generate" />
         </LinearLayout>
 
-        <!-- image edit options -->
+        <!-- download tab: only visible when the Download tab is active -->
         <LinearLayout
-            android:id="@+id/panel_i2i"
+            android:id="@+id/panel_download"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone">
 
-            <Button
-                android:id="@+id/pick"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Choose input image" />
-
             <TextView
-                android:id="@+id/input_info"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="No image selected. The output keeps the input's aspect ratio at the size chosen above."
+                android:layout_marginTop="8dp"
+                android:text="Download from Hugging Face — DiT model(s) to fetch (pick at least one):"
                 android:textSize="12sp" />
-
-            <ImageView
-                android:id="@+id/input_preview"
-                android:layout_width="match_parent"
-                android:layout_height="160dp"
-                android:adjustViewBounds="true"
-                android:scaleType="fitCenter" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/pick2"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="+ 2nd reference (optional)" />
-
-                <Button
-                    android:id="@+id/clear2"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Clear" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/input_info2"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="No 2nd reference. With one, the prompt can refer to &quot;image 1&quot; / &quot;image 2&quot;; the output follows the last image's aspect ratio."
-                android:textSize="12sp" />
-
-            <ImageView
-                android:id="@+id/input_preview2"
-                android:layout_width="match_parent"
-                android:layout_height="160dp"
-                android:adjustViewBounds="true"
-                android:scaleType="fitCenter"
-                android:visibility="gone" />
 
             <CheckBox
-                android:id="@+id/ref_half"
+                android:id="@+id/dl_standard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Standard (dit.mnn) — size unknown" />
+
+            <CheckBox
+                android:id="@+id/dl_turbo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="Turbo (dit_turbo.mnn) — size unknown" />
+
+            <CheckBox
+                android:id="@+id/dl_2bit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="2-bit (dit_2bit.mnn) — size unknown" />
+
+            <CheckBox
+                android:id="@+id/dl_2bit_turbo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="2-bit + Turbo (dit_2bit_turbo.mnn) — size unknown" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Download from Hugging Face — VAE model(s) to fetch (pick at least one):"
+                android:textSize="12sp" />
+
+            <CheckBox
+                android:id="@+id/dl_tiny_vae"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Tiny VAE (vae_decoder_tiny.mnn + vae_encoder_tiny.mnn) — size unknown" />
+
+            <CheckBox
+                android:id="@+id/dl_real_vae"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:text="Real VAE (vae_decoder.mnn + vae_encoder.mnn) — size unknown" />
+
+            <Button
+                android:id="@+id/download"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Shrink each reference to half size (less RAM/time, esp. with 2 references)" />
+                android:layout_marginTop="8dp"
+                android:text="Download models from Hugging Face" />
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Steps" />
-
-            <EditText
-                android:id="@+id/steps"
-                android:layout_width="64dp"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:text="20" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:text="Seed" />
-
-            <EditText
-                android:id="@+id/seed"
-                android:layout_width="96dp"
-                android:layout_height="wrap_content"
-                android:inputType="numberSigned"
-                android:text="42" />
-        </LinearLayout>
-
-        <CheckBox
-            android:id="@+id/turbo"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="Turbo LoRA (6 fixed steps, faster, needs dit_turbo.mnn)" />
-
-        <CheckBox
-            android:id="@+id/dit_2bit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="2-bit DiT (smaller/faster, lossier — combines with Turbo)" />
-
-        <CheckBox
-            android:id="@+id/tiny_vae"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="Tiny VAE (TAEQI2.1 — faster, less RAM, on GPU — recommended)" />
-
-        <CheckBox
-            android:id="@+id/gpu"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="DiT on GPU (OpenCL)" />
-
-        <CheckBox
-            android:id="@+id/te_cpu"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="Text encoder on CPU" />
-
-        <CheckBox
-            android:id="@+id/keep"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="Keep models in memory (faster repeat, more RAM)" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Download from Hugging Face — DiT model(s) to fetch:"
-            android:textSize="12sp" />
-
-        <CheckBox
-            android:id="@+id/dl_standard"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="Standard (dit.mnn) — size unknown" />
-
-        <CheckBox
-            android:id="@+id/dl_turbo"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="Turbo (dit_turbo.mnn) — size unknown" />
-
-        <CheckBox
-            android:id="@+id/dl_2bit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="2-bit (dit_2bit.mnn) — size unknown" />
-
-        <CheckBox
-            android:id="@+id/dl_2bit_turbo"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="2-bit + Turbo (dit_2bit_turbo.mnn) — size unknown" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Download from Hugging Face — VAE model(s) to fetch:"
-            android:textSize="12sp" />
-
-        <CheckBox
-            android:id="@+id/dl_tiny_vae"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="Tiny VAE (vae_decoder_tiny.mnn + vae_encoder_tiny.mnn) — size unknown" />
-
-        <CheckBox
-            android:id="@+id/dl_real_vae"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="false"
-            android:text="Real VAE (vae_decoder.mnn + vae_encoder.mnn) — size unknown" />
-
-        <Button
-            android:id="@+id/download"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Download models from Hugging Face" />
-
-        <Button
-            android:id="@+id/generate"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Generate" />
 
         <ProgressBar
             android:id="@+id/progress"

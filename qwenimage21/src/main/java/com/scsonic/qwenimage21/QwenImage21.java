@@ -130,9 +130,12 @@ public final class QwenImage21 implements AutoCloseable {
          * training resolution and the smaller tiers trade detail for speed and peak memory.
          */
         public enum Tier {
-            STANDARD("Standard", 512, "best quality"),
-            FAST("Fast", 384, "~1.8x faster steps"),
-            TINY("Tiny", 320, "~2.5x faster steps, soft detail");
+            STANDARD("Standard", 512, "best quality, 16 GB+ RAM recommended"),
+            FAST("Fast", 384, "~1.8x faster steps, 12 GB+ RAM recommended"),
+            TINY("Tiny", 320, "~2.5x faster steps, soft detail, 12 GB+ RAM recommended"),
+            MICRO("Micro", 256, "smallest/fastest so far, most detail loss — try this to fit under 8 GB RAM"),
+            NANO("Nano", 192, "untested — for devices that still don't fit at Micro"),
+            PICO("Pico", 128, "untested — the floor; below this the model's own training resolution stops helping");
 
             /** Square root of the pixel budget: the tier renders about {@code side * side} pixels. */
             public final int side;
@@ -166,8 +169,8 @@ public final class QwenImage21 implements AutoCloseable {
             double area = (double) tier.side * tier.side;
             double ar = (double) ratio.w / ratio.h;
             double fw = Math.sqrt(area * ar);
-            int w = Math.max(256, (int) Math.round(fw / 32.0) * 32);
-            int h = Math.max(256, (int) Math.round(fw / ar / 32.0) * 32);
+            int w = Math.max(32, (int) Math.round(fw / 32.0) * 32);
+            int h = Math.max(32, (int) Math.round(fw / ar / 32.0) * 32);
             return new Size(ratio, tier, w, h);
         }
 
@@ -336,8 +339,8 @@ public final class QwenImage21 implements AutoCloseable {
     public static int[] editSize(int srcW, int srcH, Size.Tier tier) {
         double ar = (double) srcW / srcH;
         double fw = Math.sqrt((double) tier.side * tier.side * ar);
-        return new int[]{Math.max(256, (int) Math.round(fw / 32.0) * 32),
-                Math.max(256, (int) Math.round(fw / ar / 32.0) * 32)};
+        return new int[]{Math.max(32, (int) Math.round(fw / 32.0) * 32),
+                Math.max(32, (int) Math.round(fw / ar / 32.0) * 32)};
     }
 
     private synchronized void run(String prompt, String input, String input2, int width, int height, int steps,

@@ -41,9 +41,31 @@ up well against int4.*
 **Step count matters more for int2 than int4.** An early sanity check at only 8 steps (no Turbo) produced a
 visibly malformed image — not soft/blurry, but structurally wrong (duplicated/melted shapes) — while the exact
 same prompt/seed at 20 steps was clean. This looks like quantization noise that a short schedule doesn't give the
-model enough steps to correct, rather than a hard quality ceiling. Turbo's fixed 6-step schedule is a different,
-distilled schedule (not the same interpolation cut short) and was clean from the first test. If you use the base
-(non-Turbo) int2 model, stay at something like the app's default 20 steps rather than dropping it to save time.
+model enough steps to correct, rather than a hard quality ceiling. If you use the base (non-Turbo) int2 model,
+stay at something like the app's default 20 steps rather than dropping it to save time.
+
+**int2 + Turbo runs cleanly but is visibly softer than int4 + Turbo.** Turbo's fixed 6-step schedule is a
+different, distilled schedule (not the same interpolation cut short), and it does produce a coherent image with
+int2 — it isn't broken. But directly comparing int2+Turbo against int4+Turbo on the *same* prompt/seed/size shows
+a real, consistent quality gap: int4+Turbo is sharper (crisp object edges, fine texture like wood grain or apple
+skin speckling), int2+Turbo is softer with somewhat warped geometry, more so in scenes with lots of straight lines
+(a café's window grid) than in simple single-object scenes (an apple, where the gap is subtle). The likely
+explanation is the same one as the step-count finding above: Turbo's 6 steps don't give int2 as much room to
+correct its quantization noise as the base model's 20 do, and int4 starts from much less quantization error to
+begin with.
+
+<p>
+<img src="twobit_turbo_coffee_2bit.png" width="24%"/>
+<img src="twobit_turbo_coffee_4bit.png" width="24%"/>
+<img src="twobit_turbo_apple_2bit.png" width="24%"/>
+<img src="twobit_turbo_apple_4bit.png" width="24%"/>
+</p>
+
+*Same prompt/seed/size (512×512, 6 Turbo steps) for each pair. Coffee shop: int2 (1st) vs int4 (2nd) — the
+window grid and furniture are noticeably crisper in int4. Apple: int2 (3rd) vs int4 (4th) — both correct, int4 has
+finer wood-grain and skin-speckle detail. If Turbo speed matters more than the last bit of sharpness, int2+Turbo
+is usable; if you want Turbo's speed *and* int4's sharpness, that's just int4+Turbo (5.2 GB) — there's no way to
+get both the 2-bit size and int4 sharpness today.*
 
 ## Two MNN bugs found and fixed along the way
 

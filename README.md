@@ -70,13 +70,15 @@ seed/steps, real VAE vs. tiny VAE:
 write-up, side-by-side real-vs-tiny image pairs, and how it was exported/verified: **[docs/TINY_VAE.md](docs/TINY_VAE.md)**.
 
 **2-bit DiT (optional)** — a smaller (3.6 GB vs 4.5 GB), lossier `dit_2bit.mnn` from the GGUF repo's Q2_K
-quantization, combinable with Turbo. Honest finding: it's **not faster** on this OpenCL runtime (int2's kernel
-path is less optimized than int4's), only smaller — see **[docs/TWOBIT.md](docs/TWOBIT.md)** for the measurements
-and two MNN engine bugs this uncovered and fixed along the way.
+quantization, combinable with Turbo. Honest findings: it's **not faster** on this OpenCL runtime (int2's kernel
+path is less optimized than int4's), only smaller; and **int2 + Turbo is visibly softer than int4 + Turbo** on the
+same prompt/seed (Turbo's 6 steps give int2 less room to correct its quantization noise than the base model's 20
+do) — see **[docs/TWOBIT.md](docs/TWOBIT.md)** for the side-by-side comparisons and two MNN engine bugs this
+uncovered and fixed along the way.
 
 <p>
 <img src="docs/twobit_t2i_coffee.png" width="24%"/>
-<img src="docs/twobit_turbo_t2i_coffee.png" width="24%"/>
+<img src="docs/twobit_turbo_coffee_4bit.png" width="24%"/>
 </p>
 
 ## Status
@@ -84,7 +86,7 @@ and two MNN engine bugs this uncovered and fixed along the way.
 | | |
 |---|---|
 | Modes | text-to-image, image editing (1–2 reference images — [docs/MULTI_REF.md](docs/MULTI_REF.md)) |
-| Resolution | any size, sides a multiple of 32, 256×256 up; 7 ratios × 3 pixel budgets in the UI ([Sizes](#sizes)). The model itself trained past 1 megapixel — the UI caps out around ~512² because that's what this phone's RAM can sustain, not a model limit |
+| Resolution | any size, sides a multiple of 32, 256×256 up; 7 ratios × 4 pixel budgets in the UI ([Sizes](#sizes)). The model itself trained past 1 megapixel — the UI caps out around ~512² because that's what this phone's RAM can sustain, not a model limit |
 | Tested device | Snapdragon 8 Gen 2 (Adreno 740), 16 GB RAM, Android 13 |
 | Speed | ~19 s/step on OpenCL fp16 at ~512² · ~451 s for 20 steps end to end |
 | Model download | ~9.9 GB by default (text encoder + vision 5.4 GB, DiT 4.5 GB, tiny VAE ~30 MB) — +0.7 GB if you opt into the real VAE instead |
@@ -183,15 +185,15 @@ try (QwenImage21 qi = new QwenImage21(modelDir, options)) {
 Pick an **aspect ratio** and a **pixel budget**. Sides keep the area and round to a multiple of 32 (same rule the
 app shows under the two spinners), so short sides only approximate the ratio.
 
-| Ratio | Standard ~512² | Fast ~384² | Tiny ~320² |
-|---|---|---|---|
-| 1:1 | 512×512 | 384×384 | 320×320 |
-| 4:3 | 576×448 | 448×320 | 384×288 |
-| 3:4 | 448×576 | 320×448 | 288×384 |
-| 3:2 | 640×416 | 480×320 | 384×256 |
-| 2:3 | 416×640 | 320×480 | 256×384 |
-| 16:9 | 672×384 | 512×288 | 416×256 |
-| 9:16 | 384×672 | 288×512 | 256×416 |
+| Ratio | Standard ~512² | Fast ~384² | Tiny ~320² | Micro ~256² | Nano ~192² | Pico ~128² |
+|---|---|---|---|---|---|---|
+| 1:1 | 512×512 | 384×384 | 320×320 | 256×256 | 192×192 | 128×128 |
+| 4:3 | 576×448 | 448×320 | 384×288 | 288×224 | 224×160 | 160×96 |
+| 3:4 | 448×576 | 320×448 | 288×384 | 224×288 | 160×224 | 96×160 |
+| 3:2 | 640×416 | 480×320 | 384×256 | 320×224 | 224×160 | 160×96 |
+| 2:3 | 416×640 | 320×480 | 256×384 | 224×320 | 160×224 | 96×160 |
+| 16:9 | 672×384 | 512×288 | 416×256 | 352×192 | 256×160 | 160×96 |
+| 9:16 | 384×672 | 288×512 | 256×416 | 192×352 | 160×256 | 96×160 |
 
 | 20 steps, text to image | Standard (448×576) | Fast (512×288) | Tiny (320×320) |
 |---|---|---|---|
@@ -201,7 +203,12 @@ app shows under the two spinners), so short sides only approximate the ratio.
 
 The text encoder (13–16 s) is a fixed cost at every size; the smaller tiers mainly cut the VAE decode peak, the
 stage most likely to be killed on a phone. In **image edit** the size picker sets the pixel budget only — the ratio
-comes from the input image.
+comes from the input image. **Micro/Nano/Pico (~256²/~192²/~128²) are new and not yet benchmarked** — they're there
+for RAM-constrained devices to try pushing below Tiny; a smoke test at Pico 128×128 ran in ~1.9 s/DiT step (Turbo,
+Snapdragon 8 Gen 2) and produced a correct if low-detail image, so the pipeline itself has no lower-size floor
+beyond the 32px-multiple requirement — but Nano/Pico aren't evaluated for quality the way Standard/Fast/Tiny are.
+(A leftover 256px floor in the native engine used to silently clamp anything smaller back up to 256×256 regardless
+of what was requested — fixed when adding these tiers.)
 
 Worth knowing: **Fast holds the subject better than Standard.** Editing the same portrait with the same prompt and
 seed, Fast kept the face, hair and pose; Standard re-drew the person (larger outputs start further from the
@@ -302,10 +309,15 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
   以 `scripts/push_models.sh` 推到手機 → 選「Text → Image」或「Image Edit」分頁 → 輸入 prompt（可從 History
   取用先前的 prompt）→ Generate。
 - **尺寸**：UI 上分開選「比例」和「大小」：比例有 1:1、4:3、3:4、3:2、2:3、16:9、9:16，大小有 Standard（約
-  512²，品質最好）、Fast（約 384²，每步快約 1.8 倍）、Tiny（約 320²，每步快約 2.5 倍，細節會糊）。邊長是「保持面積、
-  四捨五入到 32 的倍數」算出來的，所以短邊比例只是近似值，App 會顯示實際輸出尺寸。編輯模式依輸入圖比例自動決定，
-  而且**編輯時用 Fast 比 Standard 更容易保住原本的人物**（同一張人像、同樣 prompt/seed，Fast 只改了要求的部分，
-  Standard 卻把人整個換掉）。
+  512²，品質最好，建議 16GB+ RAM）、Fast（約 384²，每步快約 1.8 倍，建議 12GB+ RAM）、Tiny（約 320²，每步快約
+  2.5 倍，細節會糊，建議 12GB+ RAM，**App 預設值**）、Micro（約 256²）、Nano（約 192²，未測試）、Pico（約
+  128²，未測試，目前最小）——後三個是這次新加的，給記憶體很吃緊的裝置往下試，Pico 在測試機上 6 步 Turbo 跑出來
+  每步只要約 1.9 秒。邊長是「保持面積、四捨五入到 32 的倍數」算出來的，所以短邊比例只是近似值，App 會顯示實際
+  輸出尺寸。編輯模式依輸入圖比例自動決定，而且**編輯時用 Fast 比 Standard 更容易保住原本的人物**（同一張人像、
+  同樣 prompt/seed，Fast 只改了要求的部分，Standard 卻把人整個換掉）。
+- **下載頁面**：App 現在分三個分頁：Text → Image / Image Edit / Download。模型下載的勾選框都搬到 Download
+  分頁，算圖分頁只留跟生成有關的選項；如果某個選項（Turbo LoRA / 2-bit DiT / Tiny VAE）需要的模型檔案還沒下載，
+  該選項會變灰色，下方會有小字說明要去 Download 分頁下載什麼。
 - **為什麼用 MNN / OpenCL**：OpenCL 是目前 Android 上最快的通用 GPU 路徑，Vulkan 推測慢 1.5 倍以上（經驗判斷，
   非本模型實測）；NPU 則要針對每一代高通晶片各自轉檔，而且只有高階 NPU 才明顯贏過 GPU。文字編碼器其實適合放到
   NPU，但圖片編輯用的 vision 目前還沒辦法在 NPU 上啟用。詳見 [Why MNN and OpenCL?](#why-mnn-and-opencl)。
