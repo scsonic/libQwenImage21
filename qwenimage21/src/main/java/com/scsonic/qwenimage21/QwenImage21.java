@@ -37,12 +37,20 @@ public final class QwenImage21 implements AutoCloseable {
             "text_encoder/te_llm_config.json",
     };
 
-    /** The base model: 20–40 step schedule, {@link Options#turbo} = false. ~4.5 GB. */
+    /** The base model, int4 (GGUF Q4_K): 20–40 step schedule, {@link Options#turbo} = false,
+     * {@link Options#dit2Bit} = false. ~4.5 GB. */
     public static final String[] STANDARD_DIT_FILES = {"dit.mnn", "dit.mnn.weight"};
-    /** The <a href="https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo">Viggle-turbo</a> LoRA, applied
-     * unmerged alongside the (untouched, and not re-downloaded) int4 base weights: fixed 6-step schedule,
-     * {@link Options#turbo} = true. ~5.2 GB — mostly the same base weights again, plus the LoRA's own ~0.7 GB. */
+    /** The <a href="https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo">Viggle-turbo</a> LoRA over the int4
+     * base, applied unmerged alongside the (untouched, and not re-downloaded) int4 base weights: fixed 6-step
+     * schedule, {@link Options#turbo} = true, {@link Options#dit2Bit} = false. ~5.2 GB — mostly the same base
+     * weights again, plus the LoRA's own ~0.7 GB. */
     public static final String[] TURBO_DIT_FILES = {"dit_turbo.mnn", "dit_turbo.mnn.weight"};
+    /** The base model, int2 (GGUF Q2_K): same 20–40 step schedule as {@link #STANDARD_DIT_FILES}, smaller and
+     * faster but lossier. {@link Options#dit2Bit} = true, {@link Options#turbo} = false. ~3.6 GB. */
+    public static final String[] DIT_2BIT_FILES = {"dit_2bit.mnn", "dit_2bit.mnn.weight"};
+    /** Viggle-turbo over the int2 base, applied unmerged the same way as {@link #TURBO_DIT_FILES}.
+     * {@link Options#dit2Bit} = true, {@link Options#turbo} = true. ~4.3 GB. */
+    public static final String[] DIT_2BIT_TURBO_FILES = {"dit_2bit_turbo.mnn", "dit_2bit_turbo.mnn.weight"};
 
     /** <a href="https://huggingface.co/madebyollin/taeqi2_1">TAEQI2.1</a>, a distilled few-conv-layer VAE that
      * matches the real VAE's latent directly: {@link Options#tinyVae} = true (the default). ~30 MB total, safe to
@@ -55,12 +63,20 @@ public final class QwenImage21 implements AutoCloseable {
     /** Approximate download sizes in bytes, for UI labels before anything is downloaded. */
     public static final long STANDARD_DIT_SIZE_BYTES = 4_473_325_942L;
     public static final long TURBO_DIT_SIZE_BYTES = 5_159_749_254L;
+    public static final long DIT_2BIT_SIZE_BYTES = 3_600_907_838L;
+    public static final long DIT_2BIT_TURBO_SIZE_BYTES = 4_280_957_958L;
     public static final long TINY_VAE_SIZE_BYTES = 30_628_136L;
     public static final long REAL_VAE_SIZE_BYTES = 662_810_800L;
 
-    /** Files needed for text-to-image with the standard (non-turbo) model and the tiny (default) VAE: kept for
-     * existing callers. */
+    /** Files needed for text-to-image with the standard (non-turbo, int4) model and the tiny (default) VAE: kept
+     * for existing callers. */
     public static final String[] REQUIRED_FILES = concat(concat(SHARED_FILES, STANDARD_DIT_FILES), TINY_VAE_FILES);
+
+    /** Which DiT variant {@link #ditFiles} selects, given {@link Options#dit2Bit} / {@link Options#turbo}. */
+    private static String[] ditFiles(boolean dit2Bit, boolean turbo) {
+        if (dit2Bit) return turbo ? DIT_2BIT_TURBO_FILES : DIT_2BIT_FILES;
+        return turbo ? TURBO_DIT_FILES : STANDARD_DIT_FILES;
+    }
 
     /** Additional files needed for {@link #edit} (the vision tower; the VAE encoder is part of
      * {@link #TINY_VAE_FILES} / {@link #REAL_VAE_FILES}). */
@@ -205,6 +221,13 @@ public final class QwenImage21 implements AutoCloseable {
          */
         public boolean turbo = false;
         /**
+         * Use the int2 (GGUF Q2_K) DiT ({@link #DIT_2BIT_FILES} / {@link #DIT_2BIT_TURBO_FILES}) instead of the
+         * int4 one ({@link #STANDARD_DIT_FILES} / {@link #TURBO_DIT_FILES}). Smaller and faster, lossier — a 20-step
+         * run was visually close to int4 in testing, but it hasn't been evaluated as broadly. Combines with
+         * {@link #turbo} independently (4 DiT files total across the two flags).
+         */
+        public boolean dit2Bit = false;
+        /**
          * How large a slice of the configured output area each {@link #edit} reference image is encoded at (own
          * aspect ratio kept either way; the *output*'s own size always stays at {@link Size.Tier#side}² regardless
          * of this setting). {@link RefSize#FULL} is the original single-reference behaviour. With two references,
@@ -253,7 +276,7 @@ public final class QwenImage21 implements AutoCloseable {
     /** Loads the runtime; the heavy stages are loaded lazily during generation. */
     public QwenImage21(File modelDir, Options options) {
         Options o = options != null ? options : new Options();
-        String missing = missing(modelDir, concat(concat(SHARED_FILES, o.turbo ? TURBO_DIT_FILES : STANDARD_DIT_FILES),
+        String missing = missing(modelDir, concat(concat(SHARED_FILES, ditFiles(o.dit2Bit, o.turbo)),
                 o.tinyVae ? TINY_VAE_FILES : REAL_VAE_FILES));
         if (missing != null) {
             throw new IllegalArgumentException("Qwen-Image-2.1 model files missing in " + modelDir + ": " + missing);
@@ -331,7 +354,7 @@ public final class QwenImage21 implements AutoCloseable {
         int code;
         try {
             code = nativeGenerate(handle, prompt, input, input2, outputPng.getAbsolutePath(), steps, seed, width,
-                    height, options.turbo, options.refSize.scale, options.tinyVae, wrapped);
+                    height, options.turbo, options.refSize.scale, options.tinyVae, options.dit2Bit, wrapped);
         } finally {
             marker.clear();
         }
@@ -356,6 +379,16 @@ public final class QwenImage21 implements AutoCloseable {
     /** Null if {@link #SHARED_FILES} + {@link #TURBO_DIT_FILES} all exist, else the missing ones. */
     public static String missingTurboDitFiles(File modelDir) {
         return missing(modelDir, concat(SHARED_FILES, TURBO_DIT_FILES));
+    }
+
+    /** Null if {@link #SHARED_FILES} + {@link #DIT_2BIT_FILES} all exist, else the missing ones. */
+    public static String missing2BitDitFiles(File modelDir) {
+        return missing(modelDir, concat(SHARED_FILES, DIT_2BIT_FILES));
+    }
+
+    /** Null if {@link #SHARED_FILES} + {@link #DIT_2BIT_TURBO_FILES} all exist, else the missing ones. */
+    public static String missing2BitTurboDitFiles(File modelDir) {
+        return missing(modelDir, concat(SHARED_FILES, DIT_2BIT_TURBO_FILES));
     }
 
     /** Null if {@link #TINY_VAE_FILES} all exist, else the missing ones. */
@@ -394,7 +427,7 @@ public final class QwenImage21 implements AutoCloseable {
     }
 
     private static String describe(Options o) {
-        return (o.turbo ? "turbo, " : "") + (o.refSize == RefSize.HALF ? "ref@half, " : "")
+        return (o.dit2Bit ? "2bit, " : "") + (o.turbo ? "turbo, " : "") + (o.refSize == RefSize.HALF ? "ref@half, " : "")
                 + (o.tinyVae ? "" : "real-vae, ") + "DiT " + (o.useGpu ? "GPU" : "CPU") + ", text encoder "
                 + (o.textEncoderOnCpu ? "CPU" : "GPU") + ", VAE " + (o.vaeOnCpu ? "CPU" : "GPU")
                 + (o.keepModelsLoaded ? ", keep models loaded" : "");
@@ -413,7 +446,7 @@ public final class QwenImage21 implements AutoCloseable {
 
     private static native int nativeGenerate(long handle, String prompt, String inputImage, String inputImage2,
                                              String outputPng, int steps, int seed, int width, int height,
-                                             boolean turbo, float refAreaScale, boolean tinyVae,
+                                             boolean turbo, float refAreaScale, boolean tinyVae, boolean dit2Bit,
                                              ProgressListener listener);
 
     private static native String nativeLastError(long handle);

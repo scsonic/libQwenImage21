@@ -63,7 +63,7 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlo
                                                         jstring inputImage, jstring inputImage2, jstring outputPng,
                                                         jint steps, jint seed, jint width, jint height,
                                                         jboolean turbo, jfloat refAreaScale, jboolean tinyVae,
-                                                        jobject listener) {
+                                                        jboolean dit2Bit, jobject listener) {
     auto handle = reinterpret_cast<Handle*>(ptr);
     if (!handle) return QwenImage21Diffusion::kRuntimeError;
     std::lock_guard<std::mutex> lock(handle->mutex);
@@ -78,6 +78,7 @@ Java_com_scsonic_qwenimage21_QwenImage21_nativeGenerate(JNIEnv* env, jclass, jlo
     try {
         handle->model->setTurbo(turbo);  // forces steps to 6 internally when true; no-op when unchanged
         handle->qwen->setTinyVae(tinyVae);
+        handle->qwen->setDit2Bit(dit2Bit);
         if (width > 0 && height > 0) handle->qwen->setImageSize(width, height);
         handle->qwen->setRefAreaScale(refAreaScale > 0 ? refAreaScale : 1.0);
         std::string img1 = toString(env, inputImage);

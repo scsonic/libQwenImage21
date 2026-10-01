@@ -67,19 +67,30 @@ public final class ModelDownloader {
     }
 
     /**
-     * Downloads {@link QwenImage21#SHARED_FILES} plus whichever combination of
-     * {@link QwenImage21#STANDARD_DIT_FILES}, {@link QwenImage21#TURBO_DIT_FILES},
-     * {@link QwenImage21#TINY_VAE_FILES}, {@link QwenImage21#REAL_VAE_FILES} and {@link QwenImage21#EDIT_FILES} is
-     * selected, skipping anything already present and up to date. At least one of {@code standard}/{@code turbo},
-     * and one of {@code tinyVae}/{@code realVae}, should be true, or nothing will be usable for generation.
+     * Like the 8-argument overload, with {@code dit2Bit = false, dit2BitTurbo = false}.
      */
     public void download(File modelDir, boolean standard, boolean turbo, boolean editFiles, boolean tinyVae,
                          boolean realVae, Listener listener) throws IOException {
+        download(modelDir, standard, turbo, false, false, editFiles, tinyVae, realVae, listener);
+    }
+
+    /**
+     * Downloads {@link QwenImage21#SHARED_FILES} plus whichever combination of
+     * {@link QwenImage21#STANDARD_DIT_FILES}, {@link QwenImage21#TURBO_DIT_FILES},
+     * {@link QwenImage21#DIT_2BIT_FILES}, {@link QwenImage21#DIT_2BIT_TURBO_FILES},
+     * {@link QwenImage21#TINY_VAE_FILES}, {@link QwenImage21#REAL_VAE_FILES} and {@link QwenImage21#EDIT_FILES} is
+     * selected, skipping anything already present and up to date. At least one DiT variant and one VAE variant
+     * should be true, or nothing will be usable for generation.
+     */
+    public void download(File modelDir, boolean standard, boolean turbo, boolean dit2Bit, boolean dit2BitTurbo,
+                         boolean editFiles, boolean tinyVae, boolean realVae, Listener listener) throws IOException {
         cancelled = false;
         java.util.List<String> list = new java.util.ArrayList<>();
         java.util.Collections.addAll(list, QwenImage21.SHARED_FILES);
         if (standard) java.util.Collections.addAll(list, QwenImage21.STANDARD_DIT_FILES);
         if (turbo) java.util.Collections.addAll(list, QwenImage21.TURBO_DIT_FILES);
+        if (dit2Bit) java.util.Collections.addAll(list, QwenImage21.DIT_2BIT_FILES);
+        if (dit2BitTurbo) java.util.Collections.addAll(list, QwenImage21.DIT_2BIT_TURBO_FILES);
         if (tinyVae) java.util.Collections.addAll(list, QwenImage21.TINY_VAE_FILES);
         if (realVae) java.util.Collections.addAll(list, QwenImage21.REAL_VAE_FILES);
         if (editFiles) java.util.Collections.addAll(list, QwenImage21.EDIT_FILES);

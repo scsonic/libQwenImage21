@@ -222,6 +222,13 @@
             android:text="Turbo LoRA (6 fixed steps, faster, needs dit_turbo.mnn)" />
 
         <CheckBox
+            android:id="@+id/dit_2bit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="2-bit DiT (smaller/faster, lossier — combines with Turbo)" />
+
+        <CheckBox
             android:id="@+id/tiny_vae"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -269,6 +276,20 @@
             android:layout_height="wrap_content"
             android:checked="false"
             android:text="Turbo (dit_turbo.mnn) — size unknown" />
+
+        <CheckBox
+            android:id="@+id/dl_2bit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="2-bit (dit_2bit.mnn) — size unknown" />
+
+        <CheckBox
+            android:id="@+id/dl_2bit_turbo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="2-bit + Turbo (dit_2bit_turbo.mnn) — size unknown" />
 
         <TextView
             android:layout_width="wrap_content"

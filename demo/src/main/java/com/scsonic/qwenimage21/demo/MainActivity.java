@@ -40,7 +40,8 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 100;
 
     private EditText prompt, steps, seed;
-    private CheckBox gpu, teCpu, keep, turbo, dlStandard, dlTurbo, refHalf, tinyVae, dlTinyVae, dlRealVae;
+    private CheckBox gpu, teCpu, keep, turbo, dit2Bit, dlStandard, dlTurbo, dl2Bit, dl2BitTurbo, refHalf, tinyVae,
+            dlTinyVae, dlRealVae;
     private Button tabT2i, tabI2i, download, generate, pick2, clear2;
     private View panelT2i, panelI2i;
     private Spinner ratio, tier;
@@ -65,8 +66,11 @@ public class MainActivity extends Activity {
         teCpu = findViewById(R.id.te_cpu);
         keep = findViewById(R.id.keep);
         turbo = findViewById(R.id.turbo);
+        dit2Bit = findViewById(R.id.dit_2bit);
         dlStandard = findViewById(R.id.dl_standard);
         dlTurbo = findViewById(R.id.dl_turbo);
+        dl2Bit = findViewById(R.id.dl_2bit);
+        dl2BitTurbo = findViewById(R.id.dl_2bit_turbo);
         tinyVae = findViewById(R.id.tiny_vae);
         dlTinyVae = findViewById(R.id.dl_tiny_vae);
         dlRealVae = findViewById(R.id.dl_real_vae);
@@ -135,10 +139,17 @@ public class MainActivity extends Activity {
                 QwenImage21.STANDARD_DIT_SIZE_BYTES / 1e9));
         dlTurbo.setText(String.format("Turbo (dit_turbo.mnn) — %.1f GB, 6 fixed steps",
                 QwenImage21.TURBO_DIT_SIZE_BYTES / 1e9));
+        dl2Bit.setText(String.format("2-bit (dit_2bit.mnn) — %.1f GB", QwenImage21.DIT_2BIT_SIZE_BYTES / 1e9));
+        dl2BitTurbo.setText(String.format("2-bit + Turbo (dit_2bit_turbo.mnn) — %.1f GB, 6 fixed steps",
+                QwenImage21.DIT_2BIT_TURBO_SIZE_BYTES / 1e9));
         dlStandard.setChecked(prefs.getBoolean("dlStandard", true));
         dlTurbo.setChecked(prefs.getBoolean("dlTurbo", false));
+        dl2Bit.setChecked(prefs.getBoolean("dl2Bit", false));
+        dl2BitTurbo.setChecked(prefs.getBoolean("dl2BitTurbo", false));
         dlStandard.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlStandard", c).apply());
         dlTurbo.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dlTurbo", c).apply());
+        dl2Bit.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dl2Bit", c).apply());
+        dl2BitTurbo.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dl2BitTurbo", c).apply());
 
         dlTinyVae.setText(String.format("Tiny VAE (vae_decoder_tiny.mnn + vae_encoder_tiny.mnn) — %.0f MB",
                 QwenImage21.TINY_VAE_SIZE_BYTES / 1e6));
@@ -165,6 +176,9 @@ public class MainActivity extends Activity {
         });
         steps.setEnabled(!turbo.isChecked());
         if (turbo.isChecked()) steps.setText("6");
+
+        dit2Bit.setChecked(prefs.getBoolean("dit2Bit", false));
+        dit2Bit.setOnCheckedChangeListener((b, c) -> prefs.edit().putBoolean("dit2Bit", c).apply());
 
         setEditMode(prefs.getBoolean("editMode", false));
         refreshModelStatus();
@@ -341,14 +355,16 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------------------------------ models
 
-    /** True if at least one DiT variant (standard and/or turbo) is fully downloaded. */
+    /** True if at least one of the 4 DiT variants is fully downloaded. */
     private boolean refreshModelStatus() {
         String missingStd = QwenImage21.missingStandardDitFiles(modelDir);
         String missingTurbo = QwenImage21.missingTurboDitFiles(modelDir);
+        String missing2Bit = QwenImage21.missing2BitDitFiles(modelDir);
+        String missing2BitTurbo = QwenImage21.missing2BitTurboDitFiles(modelDir);
         String missingTinyVae = QwenImage21.missingTinyVaeFiles(modelDir);
         String missingRealVae = QwenImage21.missingRealVaeFiles(modelDir);
         String missingEdit = QwenImage21.missingEditFiles(modelDir);
-        if (missingStd != null && missingTurbo != null) {
+        if (missingStd != null && missingTurbo != null && missing2Bit != null && missing2BitTurbo != null) {
             status.setText("Models not found in " + modelDir + "\nMissing: " + missingStd
                     + "\n\nTap Download, or push them with:\nhf download " + ModelDownloader.DEFAULT_REPO
                     + " --local-dir qwen_image21\nadb push qwen_image21 " + modelDir.getParent() + "/");
@@ -362,6 +378,8 @@ public class MainActivity extends Activity {
         status.setText("Models: " + modelDir
                 + "\nStandard model (dit.mnn): " + (missingStd == null ? "ready" : "not downloaded")
                 + "\nTurbo model (dit_turbo.mnn): " + (missingTurbo == null ? "ready" : "not downloaded")
+                + "\n2-bit model (dit_2bit.mnn): " + (missing2Bit == null ? "ready" : "not downloaded")
+                + "\n2-bit + Turbo model (dit_2bit_turbo.mnn): " + (missing2BitTurbo == null ? "ready" : "not downloaded")
                 + "\nTiny VAE: " + (missingTinyVae == null ? "ready" : "not downloaded")
                 + "\nReal VAE: " + (missingRealVae == null ? "ready" : "not downloaded")
                 + (missingEdit != null ? "\nImage edit needs: " + missingEdit : "")
@@ -379,10 +397,12 @@ public class MainActivity extends Activity {
     private void startDownload() {
         final boolean wantStandard = dlStandard.isChecked();
         final boolean wantTurbo = dlTurbo.isChecked();
+        final boolean want2Bit = dl2Bit.isChecked();
+        final boolean want2BitTurbo = dl2BitTurbo.isChecked();
         final boolean wantTinyVae = dlTinyVae.isChecked();
         final boolean wantRealVae = dlRealVae.isChecked();
-        if (!wantStandard && !wantTurbo) {
-            showError("Nothing selected", "Check Standard and/or Turbo above first.");
+        if (!wantStandard && !wantTurbo && !want2Bit && !want2BitTurbo) {
+            showError("Nothing selected", "Check at least one DiT model above first.");
             return;
         }
         if (!wantTinyVae && !wantRealVae) {
@@ -393,8 +413,8 @@ public class MainActivity extends Activity {
         progress.setProgress(0);
         new Thread(() -> {
             try {
-                new ModelDownloader().download(modelDir, wantStandard, wantTurbo, true, wantTinyVae, wantRealVae,
-                        (file, done, total) -> runOnUiThread(() -> {
+                new ModelDownloader().download(modelDir, wantStandard, wantTurbo, want2Bit, want2BitTurbo, true,
+                        wantTinyVae, wantRealVae, (file, done, total) -> runOnUiThread(() -> {
                     progress.setProgress((int) (100 * done / Math.max(1, total)));
                     // file is "verifying <name>" while an existing file is checked against the repo
                     status.setText(String.format("%s %s\n%.2f / %.2f GB", file.startsWith("verifying ") ? "Checking"
@@ -414,11 +434,14 @@ public class MainActivity extends Activity {
     private void startGeneration() {
         if (!refreshModelStatus()) return;
         final boolean useTurbo = turbo.isChecked();
+        final boolean use2Bit = dit2Bit.isChecked();
         final boolean useTinyVae = tinyVae.isChecked();
-        String missingDit = useTurbo ? QwenImage21.missingTurboDitFiles(modelDir)
-                : QwenImage21.missingStandardDitFiles(modelDir);
+        String ditLabel = (use2Bit ? "2-bit" : "Standard") + (useTurbo ? " + Turbo" : "");
+        String missingDit = use2Bit
+                ? (useTurbo ? QwenImage21.missing2BitTurboDitFiles(modelDir) : QwenImage21.missing2BitDitFiles(modelDir))
+                : (useTurbo ? QwenImage21.missingTurboDitFiles(modelDir) : QwenImage21.missingStandardDitFiles(modelDir));
         if (missingDit != null) {
-            showError("Missing files", (useTurbo ? "Turbo" : "Standard") + " model needs: " + missingDit
+            showError("Missing files", ditLabel + " model needs: " + missingDit
                     + "\n\nCheck it above and tap Download.");
             return;
         }
@@ -451,6 +474,7 @@ public class MainActivity extends Activity {
         options.textEncoderOnCpu = teCpu.isChecked();
         options.keepModelsLoaded = keep.isChecked();
         options.turbo = useTurbo;
+        options.dit2Bit = use2Bit;
         options.refSize = refHalf.isChecked() ? QwenImage21.RefSize.HALF : QwenImage21.RefSize.FULL;
         options.tinyVae = useTinyVae;
         // vaeOnCpu is fixed at construction (see Options#vaeOnCpu): GPU is only safe with the tiny VAE, so force
@@ -458,12 +482,12 @@ public class MainActivity extends Activity {
         options.vaeOnCpu = !useTinyVae;
         options.crashMarkerFile = crashMarker;
         final String key = options.useGpu + "," + options.textEncoderOnCpu + "," + options.keepModelsLoaded
-                + "," + options.turbo + "," + options.vaeOnCpu;
+                + "," + options.turbo + "," + options.dit2Bit + "," + options.vaeOnCpu;
         final File out = new File(getExternalFilesDir(null), "outputs/qwen_" + System.currentTimeMillis() + ".png");
 
         setBusy(true);
         progress.setProgress(0);
-        String modelNote = (useTurbo ? "turbo LoRA, " : "") + (useTinyVae ? "" : "real VAE, ");
+        String modelNote = (use2Bit ? "2-bit, " : "") + (useTurbo ? "turbo LoRA, " : "") + (useTinyVae ? "" : "real VAE, ");
         status.setText(edit ? "Editing" + (hasRef2 ? " (2 references)" : "") + "… (" + modelNote
                         + "text encoder + vision → VAE encoder → DiT " + nSteps + " steps → VAE)"
                 : "Generating " + sz.width + "×" + sz.height + "… (" + modelNote + "text encoder → DiT " + nSteps

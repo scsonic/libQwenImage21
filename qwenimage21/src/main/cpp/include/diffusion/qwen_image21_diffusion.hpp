@@ -63,6 +63,10 @@ public:
     // LoRALinear). Takes effect on the next run()/runEdit(); forces the step count to 6 either way, since the
     // LoRA was distilled against that exact sigma schedule (see sigmas()).
     void setTurbo(bool on) override;
+    // Switches between the int4 DiT (GGUF Q4_K, dit.mnn / dit_turbo.mnn) and the int2 one (GGUF Q2_K,
+    // dit_2bit.mnn / dit_2bit_turbo.mnn) -- smaller and faster, lossier. Combines with setTurbo() independently
+    // (4 files total). Takes effect on the next run()/runEdit().
+    void setDit2Bit(bool on);
     // Each edit reference image is independently resized (own aspect ratio kept) to `scale` times the configured
     // output area before VAE/vision encoding; the output's own size is unaffected (always computed from the last
     // reference at scale 1.0 -- see editSize()). 1.0 is the original single-reference behaviour (reference ==
@@ -118,6 +122,7 @@ private:
     int mLatentH = 32;
     int mLatentW = 32;
     bool mTurbo = false;
+    bool mDit2Bit = false;
     std::string mDitFile = "dit.mnn";
     double mRefAreaScale = 1.0;
     bool mTinyVae = false;

@@ -8,6 +8,8 @@ So u = q, scale = d*sc_j, zero = 8*d*sc_j - dmin*m_j.
 import numpy as np
 
 QK_K = 256
+BITS = 4
+BLOCK = 32
 BLOCK_BYTES = 144
 
 

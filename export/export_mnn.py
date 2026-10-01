@@ -37,25 +37,36 @@ class GGUFWeights:
         shape = [int(x) for x in reversed(t.shape.tolist())]
         return torch.from_numpy(np.ascontiguousarray(data, dtype=np.float32).reshape(shape))
 
-    def _q4k(self, key):
-        import q4k
+    # GGML tensor_type -> (decode module, enum value)
+    _KQUANT_MODULES = None
+
+    def _kquant(self, key):
+        """Q4_K/Q2_K linears -> (q, scale, zero, bits, block), copied losslessly into MNN int4/int2; else None."""
+        if self._KQUANT_MODULES is None:
+            import q4k, q2k
+            GGUFWeights._KQUANT_MODULES = {12: q4k, 10: q2k}  # GGML_TYPE_Q4_K, GGML_TYPE_Q2_K
         t = self.tensors[key]
-        if int(t.tensor_type) != 12:  # GGML_TYPE_Q4_K
+        mod = self._KQUANT_MODULES.get(int(t.tensor_type))
+        if mod is None:
             return None
         ic, oc = [int(x) for x in t.shape.tolist()]
-        return q4k.q4k_decode(np.asarray(t.data).reshape(oc, -1), oc, ic)
+        q, scale, zero = mod.q4k_decode(np.asarray(t.data).reshape(oc, -1), oc, ic) if mod.BITS == 4 else \
+            mod.q2k_decode(np.asarray(t.data).reshape(oc, -1), oc, ic)
+        return q, scale, zero, mod.BITS, mod.BLOCK
 
     def prequant(self, name):
-        """Q4_K linears -> (q, scale, zero) at block 32, copied losslessly into MNN int4; None otherwise."""
+        """Q4_K/Q2_K linears -> (q, scale, zero, bits, block), copied losslessly into MNN int4/int2; else None."""
         if name.endswith(".img_mlp.gate_layer") or name.endswith(".img_mlp.proj"):
-            r = self._q4k(name.rsplit(".", 1)[0] + ".gate_up.weight")
+            r = self._kquant(name.rsplit(".", 1)[0] + ".gate_up.weight")
             if r is None:
                 return None
-            half = r[0].shape[0] // 2
+            q, scale, zero, bits, block = r
+            half = q.shape[0] // 2
             first = name.endswith("gate_layer") == self.gate_first
             sl = slice(0, half) if first else slice(half, None)
-            return tuple(np.ascontiguousarray(x[sl]) for x in r)
-        return self._q4k(name + ".weight")
+            return (np.ascontiguousarray(q[sl]), np.ascontiguousarray(scale[sl]),
+                    np.ascontiguousarray(zero[sl]), bits, block)
+        return self._kquant(name + ".weight")
 
     def __call__(self, name):
         # Linear weight provider: name without ".weight"
@@ -150,14 +161,15 @@ class Rebuilder:
         pre = pre(lin.name) if pre is not None else None
         self.last_prequant = pre is not None
         if pre is not None:
-            import q4k
-            packed, alpha = q4k.mnn_pack(*pre)
-            hl, int32 = self.write_header(ic, oc, 4)
+            q, scale, zero, bits, block = pre
+            mod = {4: __import__("q4k"), 2: __import__("q2k")}[bits]
+            packed, alpha = mod.mnn_pack(q, scale, zero)
+            hl, int32 = self.write_header(ic, oc, bits)
             wl = self.write(packed) + hl
             al = self.write(alpha.astype(np.float16) if self.scale16 else alpha)
             ext = [self.offset, wl, al, 0, 0]
             self.offset += wl + al
-            return ext, int32, 4, 32
+            return ext, int32, bits, block
         w = lin.weight.data.float()
         block = self.block if ic % self.block == 0 else 0
         if bits == 16:
