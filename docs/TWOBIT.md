@@ -1,4 +1,4 @@
-# 2-bit DiT (optional): smaller download, not faster
+# 2-bit DiT (experimental, not recommended): smaller download, unreliable quality
 
 [leejet/Qwen-Image-2.1-GGUF](https://huggingface.co/leejet/Qwen-Image-2.1-GGUF) also publishes a **Q2_K**
 quantization of the DiT, alongside the Q4_K one this project already uses for `dit.mnn`. `dit_2bit.mnn` is the
@@ -67,6 +67,41 @@ finer wood-grain and skin-speckle detail. If Turbo speed matters more than the l
 is usable; if you want Turbo's speed *and* int4's sharpness, that's just int4+Turbo (5.2 GB) — there's no way to
 get both the 2-bit size and int4 sharpness today.*
 
+## A wider test: some prompts fail outright, not just "softer"
+
+A 10-prompt battery (same seed, same size, diverse subjects) comparing int4+Turbo / int2 (20 steps) / int2+Turbo
+side by side surfaced something worse than the softening above: on 2 of 10 prompts, int2 produced a **structurally
+wrong image — the wrong subject, not just a bad rendering of the right one** — and it happened the same way in
+both the 20-step base model and the 6-step Turbo model, ruling out "not enough steps" as the explanation.
+
+| Prompt | int4 produced | int2 produced (both schedules) |
+|---|---|---|
+| "A cat sitting on a windowsill at sunset" | a correct cat | fox/bear-like creatures instead of a cat |
+| "A vintage bicycle leaning against a brick wall, autumn leaves on the ground" | one correct bicycle | a duplicated, warped double-bicycle shape |
+
+<p>
+<img src="twobit_fail_cat_4bit.png" width="24%"/>
+<img src="twobit_fail_cat_2bit.png" width="24%"/>
+<img src="twobit_fail_bicycle_4bit.png" width="24%"/>
+<img src="twobit_fail_bicycle_2bit.png" width="24%"/>
+</p>
+
+*int4+Turbo (1st, 3rd) vs int2 at 20 steps, no Turbo (2nd, 4th) — same prompt/seed/size each pair. The no-Turbo
+run failing exactly the same way as Turbo rules out a Turbo-step-budget explanation.*
+
+Full 10-prompt grid — rows are the prompt, columns are int4+Turbo / int2 (20 steps) / int2+Turbo:
+
+<p>
+<img src="twobit_grid_10prompts.png" width="90%"/>
+</p>
+
+The other 8 prompts (apple, ramen, coffee cup, bookshelf, mountain, city skyline, coffee shop, sushi) came out
+fine to mildly soft, consistent with the findings above. But 2 outright failures in 10 prompts — and a cat on a
+windowsill isn't an unusually complex scene — means **int2 isn't reliable enough to use without checking every
+result**. It isn't fixable by adding steps, by using or skipping Turbo, or by avoiding busy/geometric scenes.
+Treat it as experimental: fine for quick, throwaway previews you're going to look at anyway, not for anything you
+need to come out right the first time.
+
 ## Two MNN bugs found and fixed along the way
 
 Both are in the runtime fork (`MNN/`), not in this repo's export scripts — GGUF Q2_K with MNN's own int2 format
@@ -104,7 +139,10 @@ demo app has a **2-bit DiT** checkbox next to **Turbo LoRA**, and matching downl
 
 ## Status
 
-Verified end-to-end on the test phone (Snapdragon 8 Gen 2, OpenCL): both `dit_2bit.mnn` and
-`dit_2bit_turbo.mnn` load and generate correctly after the two MNN fixes above. Not yet evaluated on image
-editing (only text-to-image) or on other GPUs/vendors, where the now-fixed OpenCL low-memory int2 path may
-behave differently.
+Technically working: `dit_2bit.mnn` and `dit_2bit_turbo.mnn` load and generate correctly end-to-end on the test
+phone (Snapdragon 8 Gen 2, OpenCL) after the two MNN fixes above. **Quality is not reliable enough to recommend**
+— the 10-prompt battery above found 2 outright subject failures that neither more steps nor Turbo on/off fixes.
+Both files are uploaded (`evankuo/Qwen-Image-2.1-MNN`) and wired into the app/library for anyone who wants to
+experiment, but int4 (`dit.mnn` / `dit_turbo.mnn`) is the one to actually use. Not yet evaluated on image editing
+(only text-to-image) or on other GPUs/vendors, where the now-fixed OpenCL low-memory int2 path may behave
+differently.

@@ -69,12 +69,13 @@ seed/steps, real VAE vs. tiny VAE:
 ¹ First run after install pays a one-time OpenCL shader-compile cost; every run after that was 0.09 s. Full
 write-up, side-by-side real-vs-tiny image pairs, and how it was exported/verified: **[docs/TINY_VAE.md](docs/TINY_VAE.md)**.
 
-**2-bit DiT (optional)** — a smaller (3.6 GB vs 4.5 GB), lossier `dit_2bit.mnn` from the GGUF repo's Q2_K
-quantization, combinable with Turbo. Honest findings: it's **not faster** on this OpenCL runtime (int2's kernel
-path is less optimized than int4's), only smaller; and **int2 + Turbo is visibly softer than int4 + Turbo** on the
-same prompt/seed (Turbo's 6 steps give int2 less room to correct its quantization noise than the base model's 20
-do) — see **[docs/TWOBIT.md](docs/TWOBIT.md)** for the side-by-side comparisons and two MNN engine bugs this
-uncovered and fixed along the way.
+**2-bit DiT (experimental, not recommended)** — a smaller (3.6 GB vs 4.5 GB) `dit_2bit.mnn` from the GGUF repo's
+Q2_K quantization. It's **not faster** on this OpenCL runtime either (int2's kernel path is less optimized than
+int4's) — only smaller. Worse: a 10-prompt test found it produces outright wrong subjects on 2 of 10 prompts (a
+cat became fox/bear-like creatures, a bicycle came out duplicated and warped), the same way whether using Turbo
+or the full 20-step schedule — not fixable by more steps. Still uploaded and wired in for anyone who wants to
+experiment, but int4 is the one to actually use. Full write-up and the 10-prompt comparison grid:
+**[docs/TWOBIT.md](docs/TWOBIT.md)**.
 
 <p>
 <img src="docs/twobit_t2i_coffee.png" width="24%"/>
@@ -94,7 +95,7 @@ uncovered and fixed along the way.
 | Turbo (experimental) | [Viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) LoRA, unmerged: 6 steps instead of 20–40, ~half the total time, +5.2 GB (own copy of the base weights + the LoRA). Opt-in in the app (a download checkbox + a Turbo LoRA checkbox) — [docs/TURBO.md](docs/TURBO.md) |
 | Multi-reference editing (experimental) | A 2nd reference image, no new model files. Each reference can be independently shrunk to save RAM/time — [docs/MULTI_REF.md](docs/MULTI_REF.md) |
 | Tiny VAE (default) | [TAEQI2.1](https://huggingface.co/madebyollin/taeqi2_1), a distilled VAE: ~30 MB vs ~660 MB, ~217x faster decode, runs on GPU instead of a forced CPU fallback, near-identical output. On by default in the app (a Tiny VAE checkbox) and the library (`Options.tinyVae`) — [docs/TINY_VAE.md](docs/TINY_VAE.md) |
-| 2-bit DiT (optional) | GGUF Q2_K DiT, 3.6 GB vs int4's 4.5 GB, combines with Turbo (`dit_2bit_turbo.mnn`, 4.3 GB). Smaller, not faster — a 2-bit DiT step measured slightly *slower* than int4's on this OpenCL runtime. Opt-in in the app (download checkboxes + a 2-bit DiT checkbox) — [docs/TWOBIT.md](docs/TWOBIT.md) |
+| 2-bit DiT (experimental, not recommended) | GGUF Q2_K DiT, 3.6 GB vs int4's 4.5 GB. Smaller, not faster, and a 10-prompt test found outright-wrong-subject failures on 2 of 10 prompts, unfixable by more steps or Turbo on/off. Opt-in in the app for experimentation only — [docs/TWOBIT.md](docs/TWOBIT.md) |
 
 | 20 steps | text encoder | K/V prefix | DiT | VAE | total |
 |---|---|---|---|---|---|
@@ -337,11 +338,12 @@ Snapdragon 8 Gen 2（16 GB）上 448×576、20 步約 7.5 分鐘。
   LoRA），隨時可切換回原本模型。App 下載畫面可以分別勾選要下載 Standard / Turbo 模型（可以只裝一個或兩個都裝），
   另外有一個「Turbo LoRA」勾選框決定這次生成要用哪個模型，勾選後 Steps 會鎖定顯示 6。範例圖與細節見
   [docs/TURBO.md](docs/TURBO.md)。
-- **2-bit DiT（選用）**：GGUF 上還有 Q2_K 版本，用跟 Q4_K 一樣的無損搬移法轉成 `dit_2bit.mnn`（3.6GB，比 4bit
-  的 4.5GB 小約 20%），可以跟 Turbo 疊加（`dit_2bit_turbo.mnn`，4.3GB）。老實說：**2bit 沒有比較快**，實測
-  在這個 OpenCL runtime 上每步反而略慢一點（int2 的 kernel path 沒有 int4 優化得好），唯一的好處是下載/安裝
-  檔案比較小。過程中發現並修好兩個 MNN 本身的 bug（一個 use-after-free crash、一個造成 NaN 的 dequant offset
-  漏算），細節見 [docs/TWOBIT.md](docs/TWOBIT.md)。
+- **2-bit DiT（實驗性，不建議使用）**：GGUF 上還有 Q2_K 版本，用跟 Q4_K 一樣的無損搬移法轉成 `dit_2bit.mnn`
+  （3.6GB，比 4bit 的 4.5GB 小約 20%），可以跟 Turbo 疊加（`dit_2bit_turbo.mnn`，4.3GB）。老實說：**2bit 沒有
+  比較快**，實測在這個 OpenCL runtime 上每步反而略慢一點。更嚴重的是，拿 10 個不同 prompt 測試，2bit 有 2 個
+  直接把主體畫錯（貓變成類似狐狸/熊的生物、腳踏車變成扭曲的雙重殘影），不管用不用 Turbo、步數多少都一樣壞，
+  不是加步數能救的。過程中有發現並修好兩個 MNN 本身的 bug（一個 use-after-free crash、一個造成 NaN 的
+  dequant offset 漏算），但畫質本身不建議實際使用，細節跟 10 張對照圖見 [docs/TWOBIT.md](docs/TWOBIT.md)。
 - **雙參考圖編輯（實驗中）**：編輯模式可以再加一張參考圖（不需要新的模型檔案，純運算邏輯）。每張參考圖可以獨立
   縮小面積（縮到一半的話,兩張參考圖加起來的成本大約等於今天單張全尺寸），輸出本身的尺寸不受影響。細節見
   [docs/MULTI_REF.md](docs/MULTI_REF.md)。
