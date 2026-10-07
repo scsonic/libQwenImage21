@@ -1,6 +1,53 @@
-# Command line, building from source, repository layout
+# Timings, command line, building from source, repository layout
 
 [← back to the main README](../README.md)
+
+## Timings
+
+| 20 steps | text encoder | K/V prefix | DiT | VAE | total |
+|---|---|---|---|---|---|
+| Text to image, 448×576 | 22 s | 2.7 s (P=58) | 20×19.1 s | 18 s | **451 s** |
+| Edit → 352×448 (Fast) | 67 s (+vision) | 17 s (P=672) | 20×12.6 s | 13 s | **348 s** |
+| Edit → 448×576 (Standard) | 80 s | 26 s (P=1064) | 20×21.4 s | 22 s | **556 s** |
+
+| Turbo, 6 steps | text encoder + prefix | DiT | VAE | total |
+|---|---|---|---|---|
+| Text to image, 448×576–512×512 | ~15 s | 6×~22 s ≈ 134 s | ~18 s | **~216–235 s** |
+| Edit, 1 reference → 352×448 | ~20 s (+vision, P≈680) | 6×~18 s ≈ 108 s | ~13 s | **~196–200 s** |
+| Edit, 2 references (half scale), ~448×576–672×384 | ~70 s (+2× vision, +2× VAE-encode, P~1100) | 6×~27 s ≈ 161 s | ~22 s | **257–275 s** |
+
+An edit step is slower than a text-to-image step at the same size because attention also runs over the condition
+image's tokens (P+N keys instead of N); a 2nd reference adds more of the same.
+
+| 20 steps, text to image | Standard (448×576) | Fast (512×288) | Tiny (320×320) |
+|---|---|---|---|
+| DiT step | 19.1 s | 10.8 s | 7.4 s |
+| VAE decode | 18 s, 4.3 GB | 10 s, 2.6 GB | 7 s, 2.0 GB |
+| Total | 451 s | 289 s | 217 s |
+
+The text encoder (13–16 s) is a fixed cost at every size; the smaller tiers mainly cut the VAE decode peak, the
+stage most likely to be killed on a phone. A smoke test at Pico (128×128) ran ~1.9 s/DiT step on Turbo and
+produced a correct if low-detail image — the pipeline has no lower-size floor beyond the 32px-multiple
+requirement, but Micro/Nano/Pico aren't quality-evaluated the way Standard/Fast/Tiny are.
+
+## Why MNN and OpenCL?
+
+**MNN** is the only Android runtime found that covers the whole pipeline — int4 LLM engine for the 8B text
+encoder, general graph runtime for the DiT/VAE, one OpenCL backend for all three — and its converter is open
+enough to hand-build the lossless GGUF→int4 re-pack this project uses.
+
+**OpenCL over Vulkan:** OpenCL is currently the fastest general GPU path on Android. Vulkan compute is assumed
+**1.5×+ slower** here (experience with MNN on Qualcomm, not a benchmark of this model) — significant at ~20 s/step.
+Vulkan's edge is portability on GPUs without a usable OpenCL driver; MNN has a Vulkan backend if you want to
+measure it (`MNN_FORWARD_VULKAN`).
+
+**Not the NPU (yet):** a QNN/HTP graph is tied to a chip generation, so it needs a separate build per SoC, and
+only top-tier NPUs clearly beat the same-generation GPU. The text encoder (a plain int4 prefill, 13–16 s of the
+total) is the realistic NPU candidate, but the vision tower it needs for image editing can't run there today, so
+it would have to fall back to CPU whenever an input image is involved.
+
+So: OpenCL for the DiT, CPU wherever the GPU runs out of memory (currently the VAE for non-default settings),
+NPU for the text encoder as future work.
 
 ## Command line (adb)
 
